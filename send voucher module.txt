@@ -1,7 +1,13 @@
 My ask:
 
 
+Modal appear and working on the normal pages but I saw one issue.
 
+I was on customer page and manually expired the token and when clicked a customer to open side modal with customer details and actions to add/deduct Balance. Modal appeared asking for 6 digit code which is correct but soon after successfull verification, the modal didn't load. means the API call was not triggered again. in case of APIs which are used for loading data, we need to retry it.
+
+
+
+But for any API that is used for modifications like profile edit, balance changes or sending or importing vouchers, the correct flow works.
 
 
 Rewrite the Dev1 code and make it compatible with your voucher module as voucher module is already integrated and tested 
