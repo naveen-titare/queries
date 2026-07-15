@@ -1,3 +1,31 @@
+My ask:
+
+
+
+
+
+Rewrite the Dev1 code and make it compatible with your voucher module as voucher module is already integrated and tested 
+
+
+
+Provide a better solution for Order number issue.
+
+
+
+Provide a failsafe solution to Email is sent inside the DB transaction issue
+
+
+
+What is the size of In-memory Excel? I mean how many MB file it can support? Also, what is the max. file size allowed by mail servers (microsoft, google, zoho etc.) as attachment in a mail ? What happens to the attached when the max. file size allowed is crossed and mail server is rejected i.e. codes are lost in the middle (sent but never delivered)
+
+
+
+
+
+
+
+
+
 What's built
 Backend (4 migrations + 4 models + 1 service + 1 controller + 1 mailable + 1 email template):
 
