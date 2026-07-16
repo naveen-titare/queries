@@ -1,115 +1,63 @@
 <template>
   <AppLayout>
-    <div class="vconf-page">
-      <div class="vconf-header">
+    <div class="avq-customers" style="max-width:860px">
+      <div class="cust-header">
+        <div>
+          <h2>Confirm & Send</h2>
+          <p>Review order before sending - balance will be auto-deducted</p>
+        </div>
         <button class="avq-btn-ghost" @click="router.push('/send-vouchers/send')">← Back</button>
-        <h1>Confirm & Send</h1>
-        <p>Review the order before sending vouchers</p>
       </div>
 
-      <div class="vconf-layout">
-        <!-- Order Summary -->
-        <div class="avq-card vconf-card">
-          <h3>Order Summary</h3>
-          <table class="vconf-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Denomination</th>
-                <th>Qty</th>
-                <th class="num">Total</th>
-              </tr>
-            </thead>
+      <div style="display:flex; flex-direction:column; gap:20px">
+        <div class="cust-table-wrap" style="padding:20px">
+          <h3 style="font-size:14px; font-weight:700; margin-bottom:12px">Order Summary - One email per SPOC, all vouchers as Excel attachment</h3>
+          <table class="cust-table">
+            <thead><tr><th>PRODUCT</th><th>DENOMINATION</th><th>QTY</th><th style="text-align:right">TOTAL</th></tr></thead>
             <tbody>
               <tr v-for="item in cart" :key="item.key">
-                <td>
-                  <div class="vconf-product">
-                    <img v-if="item.image_url" :src="item.image_url" />
-                    <span>{{ item.product_name }}</span>
-                  </div>
-                </td>
+                <td><div style="display:flex; gap:8px; align-items:center"><div style="width:28px; height:28px; background:var(--surface-2); border:1px solid var(--border-2); border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px">{{ item.brand.charAt(0) }}</div><span>{{ item.product_name }} <small style="color:var(--ink-muted)">{{ item.brand }}</small></span></div></td>
                 <td>{{ item.currency_code }} {{ fmt(item.denomination) }}</td>
                 <td>{{ item.quantity }}</td>
-                <td class="num">₹{{ fmt(item.denomination * item.quantity) }}</td>
+                <td style="text-align:right" class="cust-balance">₹{{ fmt(item.denomination*item.quantity) }}</td>
               </tr>
             </tbody>
-            <tfoot>
-              <tr>
-                <td colspan="3" class="vconf-total-label">Total</td>
-                <td class="num vconf-total">₹{{ fmt(store.cartTotal) }}</td>
-              </tr>
-            </tfoot>
+            <tfoot><tr><td colspan="3" style="text-align:right; font-weight:700">Total ({{ cart.length }} brands, {{ store.cartItemCount }} codes)</td><td style="text-align:right; font-weight:700; font-size:18px" class="cust-balance">₹{{ fmt(store.cartTotal) }}</td></tr></tfoot>
           </table>
+          <p style="font-size:12px; color:var(--ink-muted); margin-top:8px">Excel will contain {{ store.cartItemCount }} rows: Brand | Product | Denom | Code (decrypted) | PIN | Expiry</p>
         </div>
 
-        <!-- Recipient Details -->
-        <div class="avq-card vconf-card">
-          <h3>Recipient</h3>
-          <div class="vconf-detail-grid">
-            <div class="vconf-detail-item">
-              <span class="vconf-label">Company</span>
-              <span class="vconf-value">{{ customer?.company_name }}</span>
-            </div>
-            <div class="vconf-detail-item">
-              <span class="vconf-label">Location</span>
-              <span class="vconf-value">{{ customer?.location }}</span>
-            </div>
-            <div class="vconf-detail-item">
-              <span class="vconf-label">SPOC Name</span>
-              <span class="vconf-value">{{ spoc?.name }}</span>
-            </div>
-            <div class="vconf-detail-item">
-              <span class="vconf-label">Email</span>
-              <span class="vconf-value">{{ spoc?.email }}</span>
-            </div>
-            <div class="vconf-detail-item">
-              <span class="vconf-label">Current Balance</span>
-              <span class="vconf-value">₹{{ fmt(customer?.balance) }}</span>
-            </div>
-            <div class="vconf-detail-item">
-              <span class="vconf-label">Balance After</span>
-              <span class="vconf-value" :class="balanceAfter < 0 ? 'text-red' : 'text-green'">
-                ₹{{ fmt(balanceAfter) }}
-              </span>
-            </div>
+        <div class="cust-table-wrap" style="padding:20px">
+          <h3 style="font-size:14px; font-weight:700; margin-bottom:12px">Recipient (from Customers module)</h3>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">Company</div><div style="font-size:14px; font-weight:500">{{ customer?.company_name }}</div></div>
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">Location</div><div style="font-size:14px">{{ customer?.location }}</div></div>
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">SPOC Name</div><div style="font-size:14px">{{ spoc?.name }}</div></div>
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">Email</div><div style="font-size:14px">{{ spoc?.email }}</div></div>
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">Current Balance</div><div style="font-size:14px">₹{{ fmt(customer?.balance) }}</div></div>
+            <div><div style="font-size:11px; text-transform:uppercase; color:var(--ink-muted); font-weight:600">Balance After</div><div style="font-size:14px; font-weight:700" :style="balanceAfter<0?'color:#b91c1c':'color:var(--teal-deep)'">₹{{ fmt(balanceAfter) }}</div></div>
           </div>
         </div>
 
-        <!-- Warning if negative balance -->
-        <div v-if="balanceAfter < 0" class="vconf-warning">
-          ⚠ This order will make the customer's balance negative (₹{{ fmt(balanceAfter) }}).
-          You can still proceed — the balance will go into debit.
-        </div>
+        <div v-if="balanceAfter<0" style="background:#fef6ec; border:1px solid #f3e2c7; border-radius:10px; padding:12px; color:#b45309">⚠ This will make balance negative (₹{{ fmt(balanceAfter) }}). Customer module adjustBalance would block, but you can still proceed with warning (configurable).</div>
+        <div v-if="store.cartItemCount>3000" style="background:#FFF7ED; border:1px solid #FED7AA; border-radius:10px; padding:12px; color:#9A3412">⚠ Large order: {{ store.cartItemCount }} codes ~{{ Math.ceil(store.cartItemCount*0.002) }} MB. Gmail 25MB limit (~18MB raw). If exceeded, failsafe restores balance.</div>
 
-        <!-- Send button -->
-        <div class="vconf-actions">
+        <div style="display:flex; justify-content:flex-end; gap:12px">
           <button class="avq-btn-ghost" @click="router.push('/send-vouchers/send')">Cancel</button>
-          <button
-            class="avq-btn-primary vconf-send-btn"
-            :disabled="sending"
-            @click="send"
-          >
-            {{ sending ? 'Sending vouchers…' : '✉ Confirm & Send Vouchers' }}
-          </button>
+          <button class="avq-btn-primary" style="padding:12px 28px" :disabled="sending" @click="send">{{ sending ? 'Sending… building Excel in memory' : '✉ Confirm & Send (deduct balance)' }}</button>
         </div>
-
-        <p v-if="error" class="form-error">{{ error }}</p>
+        <p v-if="error" style="color:#b91c1c; background:#fef2f2; padding:12px; border-radius:8px">{{ error }}</p>
       </div>
 
-      <!-- Success overlay -->
-      <div v-if="success" class="vconf-success-overlay">
-        <div class="vconf-success-card">
-          <div class="vconf-success-icon">✅</div>
-          <h2>Vouchers Sent!</h2>
-          <p>
-            <strong>{{ cart.length }} item(s)</strong> worth
-            <strong>₹{{ fmt(store.cartTotal) }}</strong> have been sent to
-            <strong>{{ spoc?.email }}</strong>
-          </p>
-          <p class="vconf-order-num">Order: {{ orderNumber }}</p>
-          <div class="vconf-success-actions">
-            <button class="avq-btn-primary" @click="goToCatalog">Send more vouchers</button>
-            <button class="avq-btn-ghost" @click="router.push('/dashboard')">Go to Dashboard</button>
+      <div v-if="success" style="position:fixed; inset:0; background:rgba(8,80,65,0.6); backdrop-filter:blur(4px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px">
+        <div style="background:#fff; border-radius:20px; padding:40px; max-width:480px; width:100%; text-align:center">
+          <div style="font-size:48px">✅</div>
+          <h2 style="font-size:24px; margin:12px 0">Vouchers Sent!</h2>
+          <p style="font-size:14px; color:var(--ink-muted)"><strong>{{ store.cartItemCount }} codes</strong> across {{ cart.length }} brands worth ₹{{ fmt(sentTotal) }} sent to <strong>{{ spoc?.email }}</strong></p>
+          <p style="font-size:11px; font-family:monospace; background:var(--surface-2); padding:6px 10px; border-radius:6px; margin-top:8px">Order: {{ orderNumber }} • encrypted, no file on disk</p>
+          <div style="display:flex; flex-direction:column; gap:10px; margin-top:20px">
+            <button class="avq-btn-primary" @click="router.push('/send-vouchers')">Send more</button>
+            <button class="avq-btn-ghost" @click="router.push('/dashboard')">Dashboard</button>
           </div>
         </div>
       </div>
@@ -125,96 +73,21 @@ import AppLayout from '../../shared/components/AppLayout.vue';
 
 const store = useSendVoucherStore();
 const router = useRouter();
+const customer=ref(null); const spoc=ref(null); const sending=ref(false); const success=ref(false); const error=ref(''); const orderNumber=ref(''); const sentTotal=ref(0);
+const cart=computed(()=> store.cart);
+const balanceAfter=computed(()=> (customer.value?.balance||0) - store.cartTotal);
 
-const customer = ref(null);
-const spoc = ref(null);
-const sending = ref(false);
-const success = ref(false);
-const error = ref('');
-const orderNumber = ref('');
-const cart = computed(() => store.cart);
-
-const balanceAfter = computed(() =>
-  (customer.value?.balance ?? 0) - store.cartTotal
-);
-
-onMounted(() => {
-  const c = sessionStorage.getItem('vsend_customer');
-  const s = sessionStorage.getItem('vsend_spoc');
-  if (!c || !s || !store.cart.length) {
-    router.push('/send-vouchers');
-    return;
-  }
-  customer.value = JSON.parse(c);
-  spoc.value = JSON.parse(s);
+onMounted(()=>{
+  const c=sessionStorage.getItem('avq_sendv_customer'); const s=sessionStorage.getItem('avq_sendv_spoc');
+  if(!c||!s||!store.cart.length){ router.push('/send-vouchers'); return; }
+  customer.value=JSON.parse(c); spoc.value=JSON.parse(s);
 });
 
-async function send() {
-  sending.value = true;
-  error.value = '';
-  try {
-    const result = await store.placeOrder(customer.value.id, spoc.value.id);
-    orderNumber.value = result.order.order_number;
-    success.value = true;
-    sessionStorage.removeItem('vsend_customer');
-    sessionStorage.removeItem('vsend_spoc');
-  } catch (e) {
-    error.value = e.response?.data?.message || 'Failed to send vouchers. Please try again.';
-  } finally {
-    sending.value = false;
-  }
+async function send(){
+  sending.value=true; error.value=''; sentTotal.value=store.cartTotal;
+  try{ const r=await store.placeOrder(customer.value.id, spoc.value.id); orderNumber.value=r.order.order_number; success.value=true; sessionStorage.removeItem('avq_sendv_customer'); sessionStorage.removeItem('avq_sendv_spoc'); }
+  catch(e){ error.value=e.response?.data?.message || 'Failed to send'; }
+  finally{ sending.value=false; }
 }
-
-function goToCatalog() {
-  success.value = false;
-  router.push('/send-vouchers');
-}
-
-function fmt(n) { return Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+function fmt(n){ return Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
 </script>
-
-<style>
-.vconf-page { padding: 28px; font-family: var(--fb); max-width: 860px; }
-.vconf-header { margin-bottom: 24px; }
-.vconf-header h1 { font-family: var(--fd); font-size: 24px; font-weight: 600; margin: 8px 0 4px; }
-.vconf-header p { color: var(--ink-muted); font-size: 14px; margin: 0; }
-.vconf-layout { display: flex; flex-direction: column; gap: 20px; }
-.vconf-card { padding: 24px; }
-.vconf-card h3 { font-family: var(--fd); font-size: 18px; font-weight: 600; margin: 0 0 16px; }
-.vconf-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.vconf-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 600; padding: 8px 12px; background: var(--surface-2); }
-.vconf-table td { padding: 12px; border-top: 1px solid var(--border-2); vertical-align: middle; }
-.vconf-table .num { text-align: right; font-family: var(--fd); }
-.vconf-product { display: flex; align-items: center; gap: 8px; }
-.vconf-product img { width: 28px; height: 28px; object-fit: contain; border-radius: 5px; }
-.vconf-total-label { font-weight: 700; text-align: right; padding-right: 12px; }
-.vconf-total { font-family: var(--fd); font-size: 18px; font-weight: 700; color: var(--teal-deep); }
-.vconf-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.vconf-detail-item { display: flex; flex-direction: column; gap: 4px; }
-.vconf-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
-.vconf-value { font-size: 14px; font-weight: 500; color: var(--ink); }
-.text-red { color: #b91c1c !important; }
-.text-green { color: var(--teal-deep) !important; }
-.vconf-warning { background: #fef6ec; border: 1px solid #f3e2c7; border-radius: 10px; padding: 14px 16px; font-size: 14px; color: #b45309; }
-.vconf-actions { display: flex; justify-content: flex-end; gap: 12px; }
-.vconf-send-btn { padding: 14px 28px; font-size: 15px; }
-.vconf-send-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-/* Success overlay */
-.vconf-success-overlay {
-  position: fixed; inset: 0; background: rgba(8,80,65,0.6);
-  backdrop-filter: blur(4px); z-index: 9999;
-  display: flex; align-items: center; justify-content: center; padding: 24px;
-}
-.vconf-success-card {
-  background: #fff; border-radius: 20px; padding: 48px 40px;
-  max-width: 440px; width: 100%; text-align: center;
-  box-shadow: 0 32px 80px rgba(8,80,65,0.25);
-}
-.vconf-success-icon { font-size: 56px; margin-bottom: 16px; }
-.vconf-success-card h2 { font-family: var(--fd); font-size: 28px; margin: 0 0 12px; }
-.vconf-success-card p { color: var(--ink-soft); font-size: 15px; line-height: 1.6; margin: 0 0 8px; }
-.vconf-order-num { font-size: 13px; color: var(--ink-muted); font-family: monospace; }
-.vconf-success-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
-.vconf-success-actions button { width: 100%; padding: 13px; font-size: 14px; }
-</style>
