@@ -12,7 +12,7 @@ class SendVoucherOrder extends Model
         'order_number', 'customer_id', 'spoc_id', 'sent_by',
         'total_amount', 'customer_balance_before', 'customer_balance_after',
         'status', 'email_sent_to', 'sent_at', 'failure_reason',
-        'email_attempts', 'total_codes_count',
+        'email_attempts', 'total_codes_count', 'codes_hash',
     ];
 
     protected $casts = [

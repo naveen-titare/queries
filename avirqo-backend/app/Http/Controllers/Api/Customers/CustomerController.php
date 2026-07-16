@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Customers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerSpoc;
 use App\Services\Customers\CustomerService;
 use Illuminate\Http\Request;
 
@@ -51,14 +52,95 @@ class CustomerController extends Controller
             'gst_number'          => ['nullable', 'string', 'max:20'],
             'registration_number' => ['nullable', 'string', 'max:100'],
             'spocs'               => ['sometimes', 'array', 'min:1'],
+            'spocs.*.id'          => ['sometimes', 'integer', 'exists:customer_spocs,id'],
             'spocs.*.name'        => ['required_with:spocs', 'string'],
             'spocs.*.email'       => ['required_with:spocs', 'email'],
             'spocs.*.phone'       => ['nullable', 'string'],
+            'spocs.*.status'      => ['sometimes', 'in:active,inactive'],
         ]);
 
         $customer = $this->service->update($customer, $data);
 
         return response()->json($customer);
+    }
+
+    /**
+     * Get only ACTIVE SPOCs for a customer (for order cart/catalog)
+     */
+    public function getActiveSpocs(Customer $customer)
+    {
+        $spocs = $this->service->getActiveSpocs($customer->id);
+        return response()->json($spocs);
+    }
+
+    /**
+     * Toggle SPOC status (active/inactive) - requires OTP verification
+     * POST /api/customers/{customer}/spocs/{spoc}/status
+     * Body: { "status": "active|inactive" }
+     */
+    public function toggleSpocStatus(Request $request, Customer $customer, CustomerSpoc $spoc)
+    {
+        // Verify SPOC belongs to customer
+        if ($spoc->customer_id !== $customer->id) {
+            return response()->json(['message' => 'SPOC does not belong to this customer.'], 403);
+        }
+
+        $data = $request->validate([
+            'status' => ['required', 'in:active,inactive'],
+        ]);
+
+        try {
+            $spoc = $this->service->toggleSpocStatus($spoc->id, $data['status'], $request->user()->id);
+            return response()->json($spoc);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Initiate OTP for SPOC verification
+     * POST /api/customers/{customer}/spocs/{spoc}/otp/initiate
+     */
+    public function initiateSpocOtp(Customer $customer, CustomerSpoc $spoc)
+    {
+        // Verify SPOC belongs to customer
+        if ($spoc->customer_id !== $customer->id) {
+            return response()->json(['message' => 'SPOC does not belong to this customer.'], 403);
+        }
+
+        $spoc = $this->service->initiateSpocOtp($spoc->id);
+        
+        // In production, don't return OTP - send via email/SMS
+        // For development/testing, include OTP in response
+        return response()->json([
+            'message' => 'OTP sent to SPOC email',
+            'otp' => $spoc->otp_code, // REMOVE IN PRODUCTION
+            'expires_at' => $spoc->otp_expires_at,
+        ]);
+    }
+
+    /**
+     * Verify OTP and apply SPOC changes
+     * POST /api/customers/{customer}/spocs/{spoc}/otp/verify
+     * Body: { "otp": "123456" }
+     */
+    public function verifySpocOtp(Request $request, Customer $customer, CustomerSpoc $spoc)
+    {
+        // Verify SPOC belongs to customer
+        if ($spoc->customer_id !== $customer->id) {
+            return response()->json(['message' => 'SPOC does not belong to this customer.'], 403);
+        }
+
+        $data = $request->validate([
+            'otp' => ['required', 'string', 'size:6'],
+        ]);
+
+        try {
+            $spoc = $this->service->verifySpocOtp($spoc->id, $data['otp'], $request->user()->id);
+            return response()->json($spoc);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
     }
 
     public function setStatus(Request $request, Customer $customer)

@@ -12,4 +12,7 @@ Route::middleware('auth:sanctum')->prefix('send-vouchers')->group(function () {
     Route::get('/orders', [SendVoucherController::class, 'orderHistory']);
     Route::get('/orders/{id}', [SendVoucherController::class, 'orderDetail']);
     Route::post('/orders/{id}/retry', [SendVoucherController::class, 'retryOrder']);
+    
+    // Verification endpoint - verify codes in Excel match database
+    Route::post('/orders/{id}/verify', [SendVoucherController::class, 'verifyOrder']);
 });

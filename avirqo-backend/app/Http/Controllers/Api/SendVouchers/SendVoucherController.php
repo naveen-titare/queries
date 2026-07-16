@@ -73,9 +73,48 @@ class SendVoucherController extends Controller
 
     public function orderDetail(int $id)
     {
-        $order = SendVoucherOrder::with(['customer', 'spoc', 'sentBy', 'items.product'])
+        $order = SendVoucherOrder::with(['customer', 'spoc', 'sentBy', 'items.product', 'items.codes'])
             ->findOrFail($id);
         return response()->json($order);
+    }
+
+    /**
+     * Verify that codes in Excel match the database for a given order.
+     * POST /api/send-vouchers/orders/{id}/verify
+     * Body: { "code_ids": [1, 2, 3, ...] }  -- optional, if not provided, fetches all codes for the order
+     */
+    public function verifyOrder(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'code_ids' => ['sometimes', 'array'],
+            'code_ids.*' => ['integer', 'exists:send_voucher_codes,id'],
+        ]);
+
+        $codeIds = $validated['code_ids'] ?? null;
+
+        // If code_ids not provided, fetch all sent codes for this order
+        if ($codeIds === null) {
+            $order = SendVoucherOrder::with(['items.codes'])->findOrFail($id);
+            $codeIds = [];
+            foreach ($order->items as $item) {
+                foreach ($item->codes as $code) {
+                    if ($code->status === 'sent') {
+                        $codeIds[] = $code->id;
+                    }
+                }
+            }
+        }
+
+        $verification = $this->service->getVerificationData($id);
+        
+        // If specific code_ids were provided, verify those specifically
+        if ($validated['code_ids'] ?? null) {
+            $matches = $this->service->verifyCodesHash($id, $codeIds);
+            $verification['provided_codes_match'] = $matches;
+            $verification['provided_code_ids'] = $codeIds;
+        }
+
+        return response()->json($verification);
     }
 
     public function retryOrder(int $id)

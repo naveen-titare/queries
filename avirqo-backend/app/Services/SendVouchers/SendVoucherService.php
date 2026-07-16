@@ -15,6 +15,7 @@ use App\Models\SendVoucherProduct;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 /**
  * SendVoucherService - FINAL VERSION compatible with avirqo-customers module
@@ -120,6 +121,10 @@ class SendVoucherService
                 throw new \Exception('SPOC email invalid or missing: ' . ($spoc->email ?? 'empty'));
             }
             // 3. Optional: Only allow active customers (as per Customer status enum active/on_hold/inactive)
+            // 3. SPOC must be ACTIVE (only active SPOCs can receive vouchers)
+            if ($spoc->status !== 'active') {
+                throw new \Exception("Selected SPOC is not active (status: {$spoc->status}). Only active SPOCs can receive vouchers.");
+            }
             // If you want to allow on_hold too, change to !in_array(...)
             if ($customer->status !== 'active') {
                 throw new \Exception("Customer is not active (status: {$customer->status}). Only active customers can receive vouchers.");
@@ -269,21 +274,87 @@ class SendVoucherService
         try {
             Mail::to($order->spoc->email)->send(new SendVoucherOrderMail($order, $order->customer, $order->spoc, $excelContent, $order->order_number));
 
-            DB::transaction(function () use ($order, $codeIds) {
+            // Compute verification hash from code IDs (sorted for consistency)
+            $codesHash = $this->computeCodesHash($codeIds);
+
+            DB::transaction(function () use ($order, $codeIds, $codesHash) {
                 SendVoucherCode::whereIn('id', $codeIds)->update(['status' => 'sent']);
                 $order->update([
                     'status' => 'sent',
                     'sent_at' => now(),
                     'email_attempts' => DB::raw('email_attempts + 1'),
                     'failure_reason' => null,
+                    'codes_hash' => $codesHash,
                 ]);
             });
 
-            Log::info("Order {$order->order_number} sent to {$order->email_sent_to}");
+            Log::info("Order {$order->order_number} sent to {$order->email_sent_to} [codes_hash: {$codesHash}]");
         } finally {
             unset($excelContent);
         }
         unset($allCodes);
+    }
+
+    /**
+     * Compute SHA256 hash of sorted code IDs for verification.
+     * This allows anyone to verify that the codes in the Excel match the database.
+     * Usage: hash('sha256', implode(',', $sortedCodeIds))
+     */
+    private function computeCodesHash(array $codeIds): string
+    {
+        sort($codeIds);
+        return hash('sha256', implode(',', $codeIds));
+    }
+
+    /**
+     * Verify that the provided code IDs match the order's codes_hash.
+     * Returns true if they match, false otherwise.
+     */
+    public function verifyCodesHash(int $orderId, array $codeIds): bool
+    {
+        $order = SendVoucherOrder::findOrFail($orderId);
+        if (!$order->codes_hash) {
+            return false; // No hash stored (legacy order)
+        }
+        $computedHash = $this->computeCodesHash($codeIds);
+        return hash_equals($order->codes_hash, $computedHash);
+    }
+
+    /**
+     * Get verification details for an order - returns code IDs and hash for manual verification.
+     */
+    public function getVerificationData(int $orderId): array
+    {
+        $order = SendVoucherOrder::with(['items.codes'])->findOrFail($orderId);
+        
+        $codeIds = [];
+        $codesDetail = [];
+        
+        foreach ($order->items as $item) {
+            foreach ($item->codes as $code) {
+                $codeIds[] = $code->id;
+                $codesDetail[] = [
+                    'code_id' => $code->id,
+                    'product_name' => $item->product->name ?? 'N/A',
+                    'brand' => $item->product->brand ?? 'N/A',
+                    'denomination' => $item->denomination,
+                    'status' => $code->status,
+                ];
+            }
+        }
+        
+        sort($codeIds);
+        $computedHash = $this->computeCodesHash($codeIds);
+        
+        return [
+            'order_id' => $order->id,
+            'order_number' => $order->order_number,
+            'stored_hash' => $order->codes_hash,
+            'computed_hash' => $computedHash,
+            'matches' => $order->codes_hash ? hash_equals($order->codes_hash, $computedHash) : null,
+            'total_codes' => count($codeIds),
+            'codes' => $codesDetail,
+        ];
     }
 
     public function markOrderFailed(int $orderId, string $reason): void
@@ -327,10 +398,12 @@ class SendVoucherService
     private function buildExcelInMemory(array $codes, string $orderNumber): string
     {
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        
+        // Sheet 1: Vouchers (main data)
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Vouchers');
 
-        $headers = ['Brand Name','Product','Denomination','Currency','Voucher Code','PIN','Expiry Date'];
+        $headers = ['Brand Name','Product','Denomination','Currency','Voucher Code','PIN','Expiry Date','Code ID (for verification)'];
         foreach ($headers as $col => $h) {
             $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col+1).'1';
             $sheet->setCellValue($cell, $h);
@@ -348,10 +421,50 @@ class SendVoucherService
             $sheet->setCellValue("E{$row}", $c['code']);
             $sheet->setCellValue("F{$row}", $c['pin'] ?? '');
             $sheet->setCellValue("G{$row}", $c['expiry_date']);
+            // Code ID column (H) - for verification against database
+            $sheet->setCellValue("H{$row}", $c['code_id'] ?? '');
             $sheet->getStyle("E{$row}")->getNumberFormat()->setFormatCode('@');
+            $sheet->getStyle("H{$row}")->getNumberFormat()->setFormatCode('@');
         }
 
-        foreach (range('A','G') as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+        foreach (range('A','H') as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+        // Hide the Code ID column by default (user can unhide if needed)
+        $sheet->getColumnDimension('H')->setVisible(false);
+
+        // Sheet 2: Verification Info
+        $verifySheet = $spreadsheet->createSheet();
+        $verifySheet->setTitle('Verification');
+        
+        $verifyHeaders = ['Field', 'Value'];
+        foreach ($verifyHeaders as $col => $h) {
+            $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col+1).'1';
+            $verifySheet->setCellValue($cell, $h);
+            $verifySheet->getStyle($cell)->getFont()->setBold(true);
+            $verifySheet->getStyle($cell)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB('FF1D9E75');
+            $verifySheet->getStyle($cell)->getFont()->getColor()->setARGB('FFFFFFFF');
+        }
+        
+        $verifyData = [
+            ['Order Number', $orderNumber],
+            ['Total Codes', count($codes)],
+            ['Verification Hash (SHA256)', $this->computeCodesHash(array_column($codes, 'code_id'))],
+            ['Generated At', now()->format('Y-m-d H:i:s')],
+            ['', ''],
+            ['Instructions', ''],
+            ['1. Copy the "Code ID (for verification)" column from Vouchers sheet', ''],
+            ['2. Use API: POST /api/send-vouchers/orders/{id}/verify', ''],
+            ['3. Body: { "code_ids": [comma-separated IDs] }', ''],
+            ['4. Response will confirm if codes match database', ''],
+        ];
+        
+        foreach ($verifyData as $r => $rowData) {
+            $row = $r + 2;
+            $verifySheet->setCellValue("A{$row}", $rowData[0]);
+            $verifySheet->setCellValue("B{$row}", $rowData[1]);
+        }
+        
+        $verifySheet->getColumnDimension('A')->setAutoSize(true);
+        $verifySheet->getColumnDimension('B')->setWidth(80);
 
         $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
         ob_start();

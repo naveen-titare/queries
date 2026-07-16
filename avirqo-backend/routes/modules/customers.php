@@ -16,4 +16,12 @@ Route::middleware('auth:sanctum')->prefix('customers')->group(function () {
     Route::post('/{customer}/documents', [CustomerDocumentController::class, 'upload']);
     Route::get('/{customer}/documents/{document}/download', [CustomerDocumentController::class, 'download']);
     Route::delete('/{customer}/documents/{document}', [CustomerDocumentController::class, 'destroy']);
+
+    // SPOCs - Active only (for order cart/catalog)
+    Route::get('/{customer}/spocs/active', [CustomerController::class, 'getActiveSpocs']);
+    
+    // SPOC Status toggle with OTP verification
+    Route::post('/{customer}/spocs/{spoc}/status', [CustomerController::class, 'toggleSpocStatus']);
+    Route::post('/{customer}/spocs/{spoc}/otp/initiate', [CustomerController::class, 'initiateSpocOtp']);
+    Route::post('/{customer}/spocs/{spoc}/otp/verify', [CustomerController::class, 'verifySpocOtp']);
 });

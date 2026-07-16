@@ -6,7 +6,7 @@
           <h2>Confirm & Send</h2>
           <p>Review order before sending - balance will be auto-deducted</p>
         </div>
-        <button class="avq-btn-ghost" @click="router.push('/send-vouchers/send')">← Back</button>
+        <button class="avq-btn-ghost" @click="router.push('/send-vouchers')">← Back to catalog</button>
       </div>
 
       <div style="display:flex; flex-direction:column; gap:20px">
@@ -43,20 +43,31 @@
         <div v-if="store.cartItemCount>3000" style="background:#FFF7ED; border:1px solid #FED7AA; border-radius:10px; padding:12px; color:#9A3412">⚠ Large order: {{ store.cartItemCount }} codes ~{{ Math.ceil(store.cartItemCount*0.002) }} MB. Gmail 25MB limit (~18MB raw). If exceeded, failsafe restores balance.</div>
 
         <div style="display:flex; justify-content:flex-end; gap:12px">
-          <button class="avq-btn-ghost" @click="router.push('/send-vouchers/send')">Cancel</button>
+          <button class="avq-btn-ghost" @click="router.push('/send-vouchers')">Cancel</button>
           <button class="avq-btn-primary" style="padding:12px 28px" :disabled="sending" @click="send">{{ sending ? 'Sending… building Excel in memory' : '✉ Confirm & Send (deduct balance)' }}</button>
         </div>
         <p v-if="error" style="color:#b91c1c; background:#fef2f2; padding:12px; border-radius:8px">{{ error }}</p>
       </div>
 
+      <!-- Success overlay - FIXED: uses saved cart data instead of cleared store -->
       <div v-if="success" style="position:fixed; inset:0; background:rgba(8,80,65,0.6); backdrop-filter:blur(4px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px">
         <div style="background:#fff; border-radius:20px; padding:40px; max-width:480px; width:100%; text-align:center">
           <div style="font-size:48px">✅</div>
           <h2 style="font-size:24px; margin:12px 0">Vouchers Sent!</h2>
-          <p style="font-size:14px; color:var(--ink-muted)"><strong>{{ store.cartItemCount }} codes</strong> across {{ cart.length }} brands worth ₹{{ fmt(sentTotal) }} sent to <strong>{{ spoc?.email }}</strong></p>
-          <p style="font-size:11px; font-family:monospace; background:var(--surface-2); padding:6px 10px; border-radius:6px; margin-top:8px">Order: {{ orderNumber }} • encrypted, no file on disk</p>
+          <p style="font-size:14px; color:var(--ink-muted)">
+            <strong>{{ savedCodeCount }} codes</strong> across <strong>{{ savedBrandCount }} brand{{ savedBrandCount !== 1 ? 's' : '' }}</strong>
+            worth ₹{{ fmt(savedTotal) }} sent to <strong>{{ spoc?.email }}</strong>
+          </p>
+          <p style="font-size:11px; font-family:monospace; background:var(--surface-2); padding:6px 10px; border-radius:6px; margin-top:8px">
+            Order: {{ orderNumber }} • encrypted, no file on disk
+          </p>
+          <!-- Verification info -->
+          <div v-if="codesHash" style="margin-top:12px; padding:10px; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; font-size:12px; color:#166534">
+            <strong>Verification Hash:</strong> {{ codesHash }}
+            <br><span style="font-size:11px">Use this hash to verify codes in Excel match database</span>
+          </div>
           <div style="display:flex; flex-direction:column; gap:10px; margin-top:20px">
-            <button class="avq-btn-primary" @click="router.push('/send-vouchers')">Send more</button>
+            <button class="avq-btn-primary" @click="goToCatalog">Send more</button>
             <button class="avq-btn-ghost" @click="router.push('/dashboard')">Dashboard</button>
           </div>
         </div>
@@ -73,21 +84,67 @@ import AppLayout from '../../shared/components/AppLayout.vue';
 
 const store = useSendVoucherStore();
 const router = useRouter();
-const customer=ref(null); const spoc=ref(null); const sending=ref(false); const success=ref(false); const error=ref(''); const orderNumber=ref(''); const sentTotal=ref(0);
-const cart=computed(()=> store.cart);
-const balanceAfter=computed(()=> (customer.value?.balance||0) - store.cartTotal);
 
-onMounted(()=>{
-  const c=sessionStorage.getItem('avq_sendv_customer'); const s=sessionStorage.getItem('avq_sendv_spoc');
-  if(!c||!s||!store.cart.length){ router.push('/send-vouchers'); return; }
-  customer.value=JSON.parse(c); spoc.value=JSON.parse(s);
+const customer = ref(null);
+const spoc = ref(null);
+const sending = ref(false);
+const success = ref(false);
+const error = ref('');
+const orderNumber = ref('');
+const sentTotal = ref(0);
+
+// FIX: Save cart data BEFORE placeOrder clears it
+const savedBrandCount = ref(0);
+const savedCodeCount = ref(0);
+const savedTotal = ref(0);
+const codesHash = ref('');
+
+const cart = computed(() => store.cart);
+const balanceAfter = computed(() => (customer.value?.balance || 0) - store.cartTotal);
+
+onMounted(() => {
+  const c = sessionStorage.getItem('avq_sendv_customer');
+  const s = sessionStorage.getItem('avq_sendv_spoc');
+  if (!c || !s || !store.cart.length) {
+    router.push('/send-vouchers');
+    return;
+  }
+  customer.value = JSON.parse(c);
+  spoc.value = JSON.parse(s);
 });
 
-async function send(){
-  sending.value=true; error.value=''; sentTotal.value=store.cartTotal;
-  try{ const r=await store.placeOrder(customer.value.id, spoc.value.id); orderNumber.value=r.order.order_number; success.value=true; sessionStorage.removeItem('avq_sendv_customer'); sessionStorage.removeItem('avq_sendv_spoc'); }
-  catch(e){ error.value=e.response?.data?.message || 'Failed to send'; }
-  finally{ sending.value=false; }
+async function send() {
+  sending.value = true;
+  error.value = '';
+  
+  // FIX: Capture cart data BEFORE placeOrder clears the cart
+  savedBrandCount.value = store.cart.length;
+  savedCodeCount.value = store.cartItemCount;
+  savedTotal.value = store.cartTotal;
+  
+  try {
+    const r = await store.placeOrder(customer.value.id, spoc.value.id);
+    orderNumber.value = r.order.order_number;
+    
+    // Get verification hash from backend response
+    if (r.order.codes_hash) {
+      codesHash.value = r.order.codes_hash;
+    }
+    
+    success.value = true;
+    sessionStorage.removeItem('avq_sendv_customer');
+    sessionStorage.removeItem('avq_sendv_spoc');
+  } catch (e) {
+    error.value = e.response?.data?.message || 'Failed to send';
+  } finally {
+    sending.value = false;
+  }
 }
-function fmt(n){ return Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+
+function goToCatalog() {
+  success.value = false;
+  router.push('/send-vouchers');
+}
+
+function fmt(n) { return Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
 </script>
