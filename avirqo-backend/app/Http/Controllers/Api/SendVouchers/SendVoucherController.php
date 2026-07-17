@@ -41,6 +41,91 @@ class SendVoucherController extends Controller
         return response()->json($result);
     }
 
+    /**
+     * Step 1: Initiate order - validates, reserves codes, deducts balance, sends OTP
+     * POST /api/send-vouchers/orders/initiate
+     */
+    public function initiateOrder(Request $request)
+    {
+        $data = $request->validate([
+            'customer_id' => ['required', 'integer', 'exists:customers,id'],
+            'spoc_id' => ['required', 'integer', 'exists:customer_spocs,id'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'exists:send_voucher_products,id'],
+            'items.*.denomination' => ['required', 'numeric', 'min:0.01'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
+        try {
+            $order = $this->service->initiateOrder($data, $request->user()->id);
+            return response()->json([
+                'message' => 'Order initiated. OTP sent to SPOC and admin emails.',
+                'order' => $order,
+                'requires_otp' => true,
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Send Voucher Order Initiate Failed: ' . $e->getMessage(), ['data' => $data]);
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Step 2: Verify OTP and complete order
+     * POST /api/send-vouchers/orders/{id}/verify-otp
+     * Body: { "otp": "123456" }
+     */
+    public function verifyOrderOtp(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'otp' => ['required', 'string', 'size:6'],
+        ]);
+
+        try {
+            $order = $this->service->verifyOrderOtp($id, $data['otp'], $request->user()->id);
+            return response()->json([
+                'message' => 'OTP verified. Vouchers sent successfully.',
+                'order' => $order,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Resend OTP for an order
+     * POST /api/send-vouchers/orders/{id}/resend-otp
+     */
+    public function resendOrderOtp(int $id)
+    {
+        try {
+            $order = $this->service->resendOrderOtp($id);
+            return response()->json([
+                'message' => 'OTP resent successfully.',
+                'order' => $order,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Cancel order and restore balance
+     * POST /api/send-vouchers/orders/{id}/cancel
+     */
+    public function cancelOrder(int $id)
+    {
+        try {
+            $order = $this->service->cancelOrder($id);
+            return response()->json([
+                'message' => 'Order cancelled. Balance restored.',
+                'order' => $order,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    // Legacy direct order placement (without OTP) - kept for backward compatibility
     public function placeOrder(Request $request)
     {
         $data = $request->validate([
@@ -67,7 +152,7 @@ class SendVoucherController extends Controller
     public function orderHistory(Request $request)
     {
         return response()->json(
-            $this->service->orderHistory($request->only('customer_id', 'status'))
+            $this->service->orderHistory($request->only('customer_id', 'status', 'search', 'date_from', 'date_to'))
         );
     }
 
@@ -76,6 +161,20 @@ class SendVoucherController extends Controller
         $order = SendVoucherOrder::with(['customer', 'spoc', 'sentBy', 'items.product', 'items.codes'])
             ->findOrFail($id);
         return response()->json($order);
+    }
+    
+    /**
+     * Resend voucher email for a delivered order.
+     * POST /api/send-vouchers/orders/{id}/resend-email
+     */
+    public function resendEmail(int $id)
+    {
+        try {
+            $result = $this->service->resendEmail($id);
+            return response()->json(['message' => 'Voucher email resent successfully.', 'order' => $result]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
     }
 
     /**

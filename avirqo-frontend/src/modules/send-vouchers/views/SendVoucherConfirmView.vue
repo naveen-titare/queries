@@ -42,14 +42,73 @@
         <div v-if="balanceAfter<0" style="background:#fef6ec; border:1px solid #f3e2c7; border-radius:10px; padding:12px; color:#b45309">⚠ This will make balance negative (₹{{ fmt(balanceAfter) }}). Customer module adjustBalance would block, but you can still proceed with warning (configurable).</div>
         <div v-if="store.cartItemCount>3000" style="background:#FFF7ED; border:1px solid #FED7AA; border-radius:10px; padding:12px; color:#9A3412">⚠ Large order: {{ store.cartItemCount }} codes ~{{ Math.ceil(store.cartItemCount*0.002) }} MB. Gmail 25MB limit (~18MB raw). If exceeded, failsafe restores balance.</div>
 
-        <div style="display:flex; justify-content:flex-end; gap:12px">
-          <button class="avq-btn-ghost" @click="router.push('/send-vouchers')">Cancel</button>
-          <button class="avq-btn-primary" style="padding:12px 28px" :disabled="sending" @click="send">{{ sending ? 'Sending… building Excel in memory' : '✉ Confirm & Send (deduct balance)' }}</button>
+        <!-- Step 1: Initiate Order & Send OTP -->
+        <div v-if="!otpSent" style="display:flex; flex-direction:column; gap:16px; padding:20px; background:#f0fdf4; border:1px solid #86efac; border-radius:12px">
+          <div style="display:flex; align-items:center; gap:10px; color:#166534">
+            <span style="font-size:24px">🔐</span>
+            <div>
+              <strong style="font-size:16px">OTP Verification Required</strong>
+              <div style="font-size:13px; color:var(--ink-muted)">An OTP will be sent to <strong>{{ spoc?.email }}</strong>, <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong> with order summary.</div>
+            </div>
+          </div>
+          <div style="background:white; border-radius:8px; padding:16px; border:1px solid #86efac">
+            <h4 style="margin:0 0 12px; font-size:14px; color:#166534">Order Summary for OTP Email</h4>
+            <div style="font-size:13px; color:var(--ink-muted)">
+              <div><strong>{{ cart.length }} brand{{ cart.length !== 1 ? 's' : '' }}</strong>, <strong>{{ store.cartItemCount }} codes</strong> worth <strong>₹{{ fmt(store.cartTotal) }}</strong></div>
+              <div>Customer: <strong>{{ customer?.company_name }}</strong> (Balance after: <span :style="balanceAfter<0?'color:#b91c1c':'color:var(--teal-deep)'">₹{{ fmt(balanceAfter) }}</span>)</div>
+              <div>SPOC: <strong>{{ spoc?.name }}</strong> ({{ spoc?.email }})</div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:12px">
+            <button class="avq-btn-ghost" @click="router.push('/send-vouchers')">Cancel</button>
+            <button class="avq-btn-primary" style="padding:12px 28px" :disabled="sending" @click="initiateOrder">
+              {{ sending ? 'Initiating… sending OTP' : '🔐 Initiate Order & Send OTP' }}
+            </button>
+          </div>
         </div>
+
+        <!-- Step 2: OTP Verification -->
+        <div v-else-if="otpSent && !otpVerified" style="display:flex; flex-direction:column; gap:16px; padding:20px; background:#fff3e0; border:1px solid #ffb74d; border-radius:12px">
+          <div style="display:flex; align-items:center; gap:10px; color:#e65100">
+            <span style="font-size:24px">📧</span>
+            <div>
+              <strong style="font-size:16px">OTP Sent Successfully</strong>
+              <div style="font-size:13px; color:var(--ink-muted)">OTP sent to <strong>{{ spoc?.email }}</strong>, <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong>. Valid for 10 minutes.</div>
+            </div>
+          </div>
+          
+          <div style="background:white; border-radius:8px; padding:16px; border:1px solid #ffb74d">
+            <label style="display:block; font-size:12px; font-weight:600; color:var(--ink-muted); margin-bottom:8px">Enter 6-Digit OTP</label>
+            <input v-model="otp" type="text" maxlength="6" class="avq-input" style="letter-spacing:4px; text-align:center; font-size:24px; font-family:monospace" placeholder="123456" @keyup.enter="verifyOtp" />
+            <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center">
+              <button class="avq-btn-ghost" style="padding:8px 16px" @click="resendOtp" :disabled="resending">{{ resending ? 'Resending…' : 'Resend OTP' }}</button>
+              <span style="font-size:12px; color:var(--ink-muted)">{{ otp.length }}/6 digits</span>
+            </div>
+          </div>
+          
+          <div style="display:flex; justify-content:flex-end; gap:12px">
+            <button class="avq-btn-ghost" @click="cancelOtp">Cancel Order</button>
+            <button class="avq-btn-primary" style="padding:12px 28px" :disabled="verifying || otp.length !== 6" @click="verifyOtp">
+              {{ verifying ? 'Verifying…' : '✅ Verify OTP & Send Vouchers' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 3: Final Success (after OTP verified) -->
+        <div v-else-if="otpVerified" style="display:flex; flex-direction:column; gap:16px; padding:20px; background:#f0fdf4; border:1px solid #86efac; border-radius:12px">
+          <div style="display:flex; align-items:center; gap:10px; color:#166534">
+            <span style="font-size:24px">⏳</span>
+            <div>
+              <strong style="font-size:16px">OTP Verified! Sending Vouchers…</strong>
+              <div style="font-size:13px; color:var(--ink-muted)">Building encrypted Excel and sending to SPOC email</div>
+            </div>
+          </div>
+        </div>
+
         <p v-if="error" style="color:#b91c1c; background:#fef2f2; padding:12px; border-radius:8px">{{ error }}</p>
       </div>
 
-      <!-- Success overlay - FIXED: uses saved cart data instead of cleared store -->
+      <!-- Final Success Overlay -->
       <div v-if="success" style="position:fixed; inset:0; background:rgba(8,80,65,0.6); backdrop-filter:blur(4px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px">
         <div style="background:#fff; border-radius:20px; padding:40px; max-width:480px; width:100%; text-align:center">
           <div style="font-size:48px">✅</div>
@@ -99,6 +158,13 @@ const savedCodeCount = ref(0);
 const savedTotal = ref(0);
 const codesHash = ref('');
 
+// OTP Flow State
+const otpSent = ref(false);
+const otpVerified = ref(false);
+const otp = ref('');
+const verifying = ref(false);
+const resending = ref(false);
+
 const cart = computed(() => store.cart);
 const balanceAfter = computed(() => (customer.value?.balance || 0) - store.cartTotal);
 
@@ -113,18 +179,45 @@ onMounted(() => {
   spoc.value = JSON.parse(s);
 });
 
-async function send() {
+// Step 1: Initiate Order & Send OTP
+async function initiateOrder() {
   sending.value = true;
   error.value = '';
   
-  // FIX: Capture cart data BEFORE placeOrder clears the cart
+  // Capture cart data BEFORE placeOrder clears the cart
   savedBrandCount.value = store.cart.length;
   savedCodeCount.value = store.cartItemCount;
   savedTotal.value = store.cartTotal;
   
   try {
-    const r = await store.placeOrder(customer.value.id, spoc.value.id);
+    const items = store.cart.map(i => ({
+      product_id: i.product_id,
+      denomination: i.denomination,
+      quantity: i.quantity,
+    }));
+
+    const r = await store.initiateOrder(customer.value.id, spoc.value.id, items);
     orderNumber.value = r.order.order_number;
+    otpSent.value = true;
+  } catch (e) {
+    error.value = e.response?.data?.message || 'Failed to initiate order';
+  } finally {
+    sending.value = false;
+  }
+}
+
+// Step 2: Verify OTP
+async function verifyOtp() {
+  if (otp.value.length !== 6) return;
+  verifying.value = true;
+  error.value = '';
+  
+  try {
+    otpVerified.value = true;
+    // Wait a bit for UI
+    await new Promise(r => setTimeout(r, 500));
+    
+    const r = await store.verifyOrderOtp(orderNumber.value, otp.value);
     
     // Get verification hash from backend response
     if (r.order.codes_hash) {
@@ -135,9 +228,36 @@ async function send() {
     sessionStorage.removeItem('avq_sendv_customer');
     sessionStorage.removeItem('avq_sendv_spoc');
   } catch (e) {
-    error.value = e.response?.data?.message || 'Failed to send';
+    error.value = e.response?.data?.message || 'Failed to verify OTP';
+    otpVerified.value = false;
   } finally {
-    sending.value = false;
+    verifying.value = false;
+  }
+}
+
+// Resend OTP
+async function resendOtp() {
+  resending.value = true;
+  error.value = '';
+  try {
+    await store.resendOrderOtp(orderNumber.value);
+  } catch (e) {
+    error.value = e.response?.data?.message || 'Failed to resend OTP';
+  } finally {
+    resending.value = false;
+  }
+}
+
+// Cancel OTP flow - need to restore balance
+async function cancelOtp() {
+  if (!confirm('Cancel this order? Balance will be restored.')) return;
+  error.value = '';
+  try {
+    // Call backend to cancel order and restore balance
+    await store.cancelOrder(orderNumber.value);
+    router.push('/send-vouchers');
+  } catch (e) {
+    error.value = e.response?.data?.message || 'Failed to cancel order';
   }
 }
 

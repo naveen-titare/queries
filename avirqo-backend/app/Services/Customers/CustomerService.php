@@ -68,10 +68,12 @@ class CustomerService
     /**
      * Sync SPOCs intelligently:
      * - Update existing SPOCs by ID (including status changes)
-     * - Create new SPOCs (no ID provided)
+     * - If no ID, try matching by email (case-insensitive) to prevent duplicates
+     * - Create new SPOCs (no match found)
      * - Mark SPOCs NOT in the new list as INACTIVE (soft delete)
      * - SPOCs with orders are ALWAYS marked inactive (never deleted, preserves history)
      * - Only ACTIVE SPOCs are shown in order cart/catalog
+     * - PRIMARY SPOC PROTECTION: Cannot be deleted/inactivated unless another active SPOC is set as primary
      */
     private function syncSpocs(Customer $customer, array $spocs): void
     {
@@ -79,7 +81,7 @@ class CustomerService
         $hasVoucherOrders = class_exists(\App\Models\VoucherOrder::class);
         $hasSendVoucherOrders = class_exists(\App\Models\SendVoucherOrder::class);
 
-        // Get existing SPOCs with their order counts (only if models exist)
+        // Get existing SPOCs with their order counts (only if models exist) - SINGLE QUERY
         $query = $customer->spocs();
         if ($hasVoucherOrders) {
             $query->withCount(['voucherOrders as voucher_orders_count']);
@@ -87,8 +89,16 @@ class CustomerService
         if ($hasSendVoucherOrders) {
             $query->withCount(['sendVoucherOrders as send_voucher_orders_count']);
         }
+
+        $allSpocs = $query->get(); // SINGLE QUERY
         
-        $existingSpocs = $query->get()->keyBy('id');
+        $existingSpocs = $allSpocs->keyBy('id');
+        // Create email-based lookup from SAME collection
+        $existingSpocsByEmail = $allSpocs->keyBy(fn($s) => strtolower($s->email));
+
+        // Track primary SPOC changes
+        $currentPrimary = $existingSpocs->firstWhere('is_primary', true);
+        $newPrimaryId = null;
 
         $newSpocIds = collect($spocs)
             ->filter(fn($s) => isset($s['id']))
@@ -98,34 +108,71 @@ class CustomerService
         // Process each SPOC in the request
         foreach ($spocs as $i => $spocData) {
             $spocId = $spocData['id'] ?? null;
-            $isPrimary = $i === 0;
-            $requestedStatus = $spocData['status'] ?? 'active'; // Allow status in request
+            $spocEmail = isset($spocData['email']) ? strtolower($spocData['email']) : null;
+            $isPrimary = $spocData['is_primary'] ?? ($i === 0);
+            $requestedStatus = $spocData['status'] ?? 'active';
 
+            $matchedSpoc = null;
+
+            // Try matching by ID first
             if ($spocId && $existingSpocs->has($spocId)) {
-                // UPDATE existing SPOC (including status change)
-                $existingSpocs[$spocId]->update([
+                $matchedSpoc = $existingSpocs[$spocId];
+            }
+            // Fallback: match by email (case-insensitive) from SAME collection
+            elseif ($spocEmail && $existingSpocsByEmail->has($spocEmail)) {
+                $matchedSpoc = $existingSpocsByEmail[$spocEmail];
+            }
+
+            if ($matchedSpoc) {
+                // PRIMARY SPOC PROTECTION: Check if trying to inactivate/delete primary
+                $isCurrentlyPrimary = $matchedSpoc->is_primary;
+                $isBecomingInactive = $requestedStatus === 'inactive';
+
+                if ($isCurrentlyPrimary && $isBecomingInactive) {
+                    throw new \Exception('Primary SPOC cannot be made inactive. Set another SPOC as primary first.');
+                }
+
+                // UPDATE existing SPOC
+                $matchedSpoc->update([
                     'name'       => $spocData['name'],
                     'email'      => $spocData['email'],
                     'phone'      => $spocData['phone'] ?? null,
                     'is_primary' => $isPrimary,
-                    'status'     => $requestedStatus, // Allow activate/deactivate via API
+                    'status'     => $requestedStatus,
                 ]);
-                $existingSpocs->forget($spocId); // Mark as handled
+
+                if ($isPrimary) {
+                    $newPrimaryId = $matchedSpoc->id;
+                }
+
+                // Remove from BOTH lookups to track handled SPOCs
+                $existingSpocs->forget($matchedSpoc->id);
+                $existingSpocsByEmail->forget(strtolower($matchedSpoc->email));
             } else {
                 // CREATE new SPOC (always active)
-                $customer->spocs()->create([
+                $newSpoc = $customer->spocs()->create([
                     'name'       => $spocData['name'],
                     'email'      => $spocData['email'],
                     'phone'      => $spocData['phone'] ?? null,
                     'is_primary' => $isPrimary,
                     'status'     => 'active',
                 ]);
+                if ($isPrimary) {
+                    $newPrimaryId = $newSpoc->id;
+                }
             }
         }
 
         // Handle REMAINING existing SPOCs (not in new list)
-        // These are SPOCs that were removed from the UI - mark them INACTIVE
+        // These are SPOCs that were removed from the UI
         foreach ($existingSpocs as $spoc) {
+            $isCurrentlyPrimary = $spoc->is_primary;
+
+            // PRIMARY SPOC PROTECTION: Cannot remove primary unless another is set as primary
+            if ($isCurrentlyPrimary && !$newPrimaryId) {
+                throw new \Exception('Primary SPOC cannot be removed. Set another SPOC as primary first.');
+            }
+
             // Check if SPOC has orders (only if models exist)
             $hasOrders = false;
             if ($hasVoucherOrders && isset($spoc->voucher_orders_count)) {
@@ -136,8 +183,6 @@ class CustomerService
             }
 
             // NEVER delete SPOCs - always mark inactive to preserve history
-            // SPOCs with orders MUST stay (referenced by orders via nullOnDelete FK)
-            // SPOCs without orders also marked inactive (soft delete pattern)
             $spoc->update([
                 'status' => 'inactive',
                 'is_primary' => false, // Inactive SPOCs cannot be primary
@@ -154,7 +199,7 @@ class CustomerService
             ->where('is_primary', true)
             ->where('status', 'active')
             ->exists();
-        
+
         if (! $hasActivePrimary) {
             // Promote oldest ACTIVE SPOC to primary
             $customer->spocs()
@@ -183,9 +228,14 @@ class CustomerService
     public function toggleSpocStatus(int $spocId, string $status, int $userId): \App\Models\CustomerSpoc
     {
         $spoc = CustomerSpoc::findOrFail($spocId);
-        
+
         if (!in_array($status, ['active', 'inactive'])) {
             throw new \Exception('Invalid status. Must be active or inactive.');
+        }
+
+        // PRIMARY SPOC PROTECTION: Cannot inactivate primary
+        if ($status === 'inactive' && $spoc->is_primary) {
+            throw new \Exception('Primary SPOC cannot be made inactive. Set another SPOC as primary first.');
         }
 
         // If activating, ensure it has valid email
@@ -215,10 +265,10 @@ class CustomerService
     {
         $spoc = CustomerSpoc::findOrFail($spocId);
         $otp = $spoc->generateOtp();
-        
+
         // TODO: Send OTP via email/SMS
         // Mail::to($spoc->email)->send(new SpocOtpMail($otp));
-        
+
         // For now, return the OTP (in production, don't return it - send via email)
         return $spoc->fresh();
     }
@@ -229,7 +279,7 @@ class CustomerService
     public function verifySpocOtp(int $spocId, string $otp, int $verifiedBy): \App\Models\CustomerSpoc
     {
         $spoc = CustomerSpoc::findOrFail($spocId);
-        
+
         if (!$spoc->verifyOtp($otp, $verifiedBy)) {
             throw new \Exception('Invalid or expired OTP.');
         }
@@ -249,9 +299,8 @@ class CustomerService
             if ($type === 'credit') {
                 $customer->increment('balance', $amount);
             } else {
-                if ($customer->balance < $amount) {
-                    throw new \Exception('Insufficient balance.');
-                }
+                // Customer Module: ALLOW negative balance for manual admin adjustments
+                // Order placement has its own validation that prevents negative balance
                 $customer->decrement('balance', $amount);
             }
 

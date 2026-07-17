@@ -4,6 +4,7 @@ namespace App\Services\SendVouchers;
 
 use App\Jobs\SendVoucherEmailJob;
 use App\Mail\SendVoucherOrderMail;
+use App\Mail\OrderOtpMail;
 use App\Models\Customer; // <-- REFERENCE ONLY, from avirqo-customers module, NOT MODIFIED
 use App\Models\CustomerBalanceLog; // <-- REFERENCE ONLY, from avirqo-customers module
 use App\Models\CustomerSpoc; // <-- REFERENCE ONLY, from avirqo-customers module
@@ -222,6 +223,256 @@ class SendVoucherService
             $this->markOrderFailed($order->id, $e->getMessage());
             throw new \Exception("Order {$order->order_number} created but email failed: " . $e->getMessage() . ". Balance restored, codes returned. Please retry.");
         }
+    }
+
+    /**
+     * Step 1: Initiate order - validates, reserves codes, deducts balance, generates OTP
+     * Sends OTP email to configured recipients with order summary
+     * Returns order in 'pending_otp' status
+     */
+    public function initiateOrder(array $data, int $sentByUserId): SendVoucherOrder
+    {
+        // PHASE 1 - Validate and reserve codes, deduct balance
+        $order = DB::transaction(function () use ($data, $sentByUserId) {
+            $customer = Customer::with('spocs')->findOrFail($data['customer_id']);
+            $spoc = CustomerSpoc::findOrFail($data['spoc_id']);
+
+            // Validations
+            if ((int)$spoc->customer_id !== (int)$customer->id) {
+                throw new \Exception('Selected SPOC does not belong to selected customer.');
+            }
+            if (empty($spoc->email) || !filter_var($spoc->email, FILTER_VALIDATE_EMAIL)) {
+                throw new \Exception('SPOC email invalid or missing: ' . ($spoc->email ?? 'empty'));
+            }
+            if ($spoc->status !== 'active') {
+                throw new \Exception("Selected SPOC is not active (status: {$spoc->status}). Only active SPOCs can receive vouchers.");
+            }
+            if ($customer->status !== 'active') {
+                throw new \Exception("Customer is not active (status: {$customer->status}). Only active customers can receive vouchers.");
+            }
+
+            $totalAmount = collect($data['items'])->sum(fn($i) => $i['denomination'] * $i['quantity']);
+            $totalCodesCount = collect($data['items'])->sum(fn($i) => $i['quantity']);
+            $balanceBefore = $customer->balance;
+
+            // STRICT: Block negative balance for orders
+            if ($balanceBefore < $totalAmount) {
+                throw new \Exception("Insufficient customer balance. Available: ₹{$balanceBefore}, Required: ₹{$totalAmount}. Please credit balance via Customers module first.");
+            }
+
+            $order = SendVoucherOrder::create([
+                'order_number' => 'TEMP-' . uniqid(),
+                'customer_id' => $customer->id,
+                'spoc_id' => $spoc->id,
+                'sent_by' => $sentByUserId,
+                'total_amount' => $totalAmount,
+                'customer_balance_before' => $balanceBefore,
+                'customer_balance_after' => $balanceBefore - $totalAmount,
+                'status' => 'pending_otp',
+                'email_sent_to' => $spoc->email,
+                'total_codes_count' => $totalCodesCount,
+            ]);
+
+            $safeOrderNumber = SendVoucherOrder::generateOrderNumber($order->id);
+            $order->update(['order_number' => $safeOrderNumber]);
+
+            foreach ($data['items'] as $item) {
+                $product = SendVoucherProduct::findOrFail($item['product_id']);
+                $codes = SendVoucherCode::where('product_id', $product->id)
+                    ->where('denomination', $item['denomination'])
+                    ->where('status', 'available')
+                    ->lockForUpdate()
+                    ->limit($item['quantity'])
+                    ->get();
+
+                if ($codes->count() < $item['quantity']) {
+                    throw new \Exception("Insufficient stock for {$product->name} at {$item['denomination']} — requested {$item['quantity']}, only {$codes->count()} available.");
+                }
+
+                $orderItem = SendVoucherOrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'denomination' => $item['denomination'],
+                    'currency_code' => $product->currency_code,
+                    'quantity' => $item['quantity'],
+                    'total_value' => $item['denomination'] * $item['quantity'],
+                ]);
+
+                foreach ($codes as $code) {
+                    $code->update(['status' => 'reserved', 'order_item_id' => $orderItem->id]);
+                }
+
+                CustomerVoucherHistory::create([
+                    'customer_id' => $customer->id,
+                    'voucher_name' => $product->name,
+                    'denomination' => $item['denomination'],
+                    'quantity' => $item['quantity'],
+                    'total_deducted' => $item['denomination'] * $item['quantity'],
+                    'sent_by' => $sentByUserId,
+                    'sent_at' => now(),
+                ]);
+            }
+
+            // Deduct balance
+            $customer->decrement('balance', $totalAmount);
+            $customer->refresh();
+
+            CustomerBalanceLog::create([
+                'customer_id' => $customer->id,
+                'type' => 'debit',
+                'amount' => $totalAmount,
+                'balance_after' => $customer->balance,
+                'note' => "Send Voucher order {$order->order_number} to {$spoc->email}",
+                'done_by' => $sentByUserId,
+            ]);
+
+            return $order;
+        });
+
+        // PHASE 2 - Generate and send OTP
+        try {
+            $this->sendOrderOtpEmail($order->id);
+            return $order->fresh()->load(['items.product', 'customer', 'spoc', 'sentBy']);
+        } catch (\Exception $e) {
+            Log::error("SendVoucher OTP Email Failed Order {$order->order_number}: " . $e->getMessage(), ['order_id' => $order->id]);
+            // Rollback on OTP email failure
+            $this->markOrderFailed($order->id, $e->getMessage());
+            throw new \Exception("Order {$order->order_number} created but OTP email failed: " . $e->getMessage() . ". Balance restored, codes released. Please retry.");
+        }
+    }
+
+    /**
+     * Send OTP email with order summary to configured recipients
+     * Recipients: SPOC email + naveentitare52@gmail.com + ptitare@gmail.com
+     */
+    public function sendOrderOtpEmail(int $orderId): void
+    {
+        $order = SendVoucherOrder::with(['items.product', 'customer', 'spoc'])->findOrFail($orderId);
+        if ($order->status !== 'pending_otp') {
+            throw new \Exception("Order is not in pending_otp status.");
+        }
+
+        // Generate OTP on customer
+        $customer = $order->customer;
+        $otp = $customer->generateOrderOtp();
+
+        // Build order summary for email
+        $itemsSummary = [];
+        foreach ($order->items as $item) {
+            $itemsSummary[] = [
+                'product' => $item->product->name,
+                'brand' => $item->product->brand,
+                'denomination' => $item->denomination,
+                'currency' => $item->currency_code,
+                'quantity' => $item->quantity,
+                'total' => $item->denomination * $item->quantity,
+            ];
+        }
+
+        // Recipients: SPOC email + fixed admin emails
+        $recipients = [
+            $order->spoc->email,
+            'naveentitare52@gmail.com',
+            'ptitare@gmail.com',
+        ];
+        $recipients = array_unique(array_filter($recipients));
+
+        // Send OTP email to all recipients
+        foreach ($recipients as $email) {
+            Mail::to($email)->send(new OrderOtpMail($order, $order->customer, $order->spoc, $otp, $itemsSummary));
+        }
+
+        $order->update([
+            'email_sent_to' => implode(', ', $recipients),
+            'email_attempts' => DB::raw('email_attempts + 1'),
+        ]);
+
+        Log::info("Order OTP sent for {$order->order_number} to: " . implode(', ', $recipients));
+    }
+
+    /**
+     * Step 2: Verify OTP and complete order
+     * If valid, sends actual voucher email with Excel attachment
+     */
+    public function verifyOrderOtp(int $orderId, string $otp, int $verifiedBy): SendVoucherOrder
+    {
+        $order = SendVoucherOrder::with(['items.product', 'customer', 'spoc'])->findOrFail($orderId);
+        
+        if ($order->status !== 'pending_otp') {
+            throw new \Exception("Order is not awaiting OTP verification. Current status: {$order->status}");
+        }
+
+        $customer = $order->customer;
+        
+        // Verify OTP
+        if (!$customer->verifyOrderOtp($otp, $verifiedBy)) {
+            throw new \Exception('Invalid or expired OTP.');
+        }
+
+        // Send actual voucher email with Excel
+        try {
+            $this->sendOrderEmail($order->id);
+            return $order->fresh()->load(['items.product', 'customer', 'spoc', 'sentBy']);
+        } catch (\Exception $e) {
+            Log::error("SendVoucher Email Failed after OTP Order {$order->order_number}: " . $e->getMessage(), ['order_id' => $order->id]);
+            // On failure after OTP verification, we don't auto-rollback as OTP was valid
+            // Order stays in pending_otp, can retry
+            throw new \Exception("OTP verified but voucher email failed: " . $e->getMessage() . ". Please retry sending vouchers.");
+        }
+    }
+
+    /**
+     * Resend OTP for an order
+     */
+    public function resendOrderOtp(int $orderId): SendVoucherOrder
+    {
+        $order = SendVoucherOrder::findOrFail($orderId);
+        
+        if ($order->status !== 'pending_otp') {
+            throw new \Exception("Can only resend OTP for orders in pending_otp status.");
+        }
+
+        $this->sendOrderOtpEmail($order->id);
+        return $order->fresh();
+    }
+
+    /**
+     * Cancel order and restore balance
+     */
+    public function cancelOrder(string $orderNumber): SendVoucherOrder
+    {
+        $order = SendVoucherOrder::where('order_number', $orderNumber)->firstOrFail();
+        
+        if (!in_array($order->status, ['pending_otp', 'processing'])) {
+            throw new \Exception("Can only cancel orders in pending_otp or processing status.");
+        }
+
+        DB::transaction(function () use ($order) {
+            // Release reserved codes
+            $itemIds = $order->items()->pluck('id');
+            SendVoucherCode::whereIn('order_item_id', $itemIds)->where('status','reserved')->update(['status'=>'available','order_item_id'=>null]);
+
+            // Restore customer balance
+            $customer = $order->customer;
+            $customer->increment('balance', $order->total_amount);
+
+            CustomerBalanceLog::create([
+                'customer_id' => $customer->id,
+                'type' => 'credit',
+                'amount' => $order->total_amount,
+                'balance_after' => $customer->fresh()->balance,
+                'note' => "Cancelled Send Voucher order {$order->order_number}",
+                'done_by' => $order->sent_by,
+            ]);
+
+            $order->update([
+                'status' => 'cancelled',
+                'failure_reason' => 'Cancelled by user before OTP verification',
+                'email_attempts' => DB::raw('email_attempts + 1'),
+            ]);
+        });
+
+        return $order->fresh();
     }
 
     public function sendOrderEmail(int $orderId): void
@@ -476,12 +727,83 @@ class SendVoucherService
     }
 
     public function orderHistory(array $filters = [])
+{
+    return SendVoucherOrder::with(['customer','spoc','sentBy','items.product'])
+        ->when($filters['customer_id'] ?? null, fn($q,$v) => $q->where('customer_id',$v))
+        ->when($filters['status'] ?? null, fn($q,$v) => $q->where('status',$v))
+        ->when($filters['search'] ?? null, fn($q,$s) =>
+            $q->where('order_number','like',"%{$s}%")
+              ->orWhereHas('customer', fn($cq) => $cq->where('company_name','like',"%{$s}%"))
+              ->orWhereHas('spoc', fn($sq) => $sq->where('name','like',"%{$s}%"))
+        )
+        ->when($filters['date_from'] ?? null, fn($q,$v) => $q->whereDate('created_at','>=',$v))
+        ->when($filters['date_to'] ?? null, fn($q,$v) => $q->whereDate('created_at','<=',$v))
+        ->latest()
+        ->paginate(20);
+}
+    
+     /**
+     * Resend voucher email for a delivered order.
+     * Rebuilds the Excel from stored encrypted codes and resends.
+     * No codes are exposed outside this method.
+     */
+    public function resendEmail(int $orderId): SendVoucherOrder
     {
-        return SendVoucherOrder::with(['customer','spoc','sentBy','items.product'])
-            ->when($filters['customer_id'] ?? null, fn($q,$v)=>$q->where('customer_id',$v))
-            ->when($filters['status'] ?? null, fn($q,$v)=>$q->where('status',$v))
-            ->latest()->paginate(20);
+        $order = SendVoucherOrder::with([
+            'customer', 'spoc', 'sentBy', 'items.product', 'items.codes'
+        ])->findOrFail($orderId);
+
+        if ($order->status === 'cancelled') {
+            throw new \Exception('Cannot resend email for a cancelled order.');
+        }
+
+        if (empty($order->spoc->email)) {
+            throw new \Exception('SPOC has no email address on record.');
+        }
+
+        // Rebuild Excel in memory from stored encrypted codes
+        $allCodes = [];
+        foreach ($order->items as $item) {
+            foreach ($item->codes as $code) {
+                $allCodes[] = [
+                        'brand'         => $item->product->brand ?? $item->product->name,
+                        'product_name'  => $item->product->name ?? 'N/A',
+                        'denomination'  => $item->denomination,
+                        'currency_code' => $item->currency_code,
+                        'code'          => $code->getDecryptedCode(),
+                        'pin'           => $code->getDecryptedPin(),
+                        'expiry_date'   => $code->expiry_date?->format('d/m/Y') ?? 'N/A',
+                        'code_id'       => (string) $code->id,
+];
+            }
+        }
+
+        if (empty($allCodes)) {
+            throw new \Exception('No voucher codes found for this order.');
+        }
+
+        $excelContent = $this->buildExcelInMemory($allCodes, $order->order_number);
+
+        \Illuminate\Support\Facades\Mail::to($order->spoc->email)
+            ->send(new \App\Mail\SendVoucherOrderMail(
+                $order,
+                $order->customer,
+                $order->spoc,
+                $excelContent,
+                $order->order_number
+            ));
+
+        unset($excelContent);
+
+        // Update email attempts count and mark as delivered if it was pending
+        $order->increment('email_attempts');
+        if (in_array($order->status, ['pending_otp', 'processing', 'failed', 'partially_failed'])) {
+            $order->update(['status' => 'sent', 'sent_at' => now()]);
+            }
+
+        return $order->fresh(['customer', 'spoc', 'sentBy', 'items.product']);
     }
+
 
     public function dispatchAsync(int $orderId): void
     {

@@ -28,14 +28,29 @@
           <div v-if="selectedCustomer" class="cust-table-wrap" style="padding:20px">
             <h3 style="font-size:14px; font-weight:700; margin-bottom:4px">SPOC (Recipient)</h3>
             <p style="font-size:12px; color:var(--ink-muted); margin-bottom:12px">Encrypted vouchers will be sent to this email</p>
-            <div v-if="!selectedCustomer.spocs?.length" class="cust-empty">No SPOCs found for this customer.</div>
-            <div v-else style="display:flex; flex-direction:column; gap:8px">
-              <div v-for="spoc in selectedCustomer.spocs" :key="spoc.id" @click="spoc.email && selectSpoc(spoc)" :style="selectedSpoc?.id===spoc.id ? 'border-color:var(--teal-deep); background:var(--teal-pale)' : ''" style="padding:12px; border:1.5px solid var(--border-2); border-radius:10px; cursor:pointer">
-                <div style="font-weight:600; font-size:14px">{{ spoc.name }} <span v-if="spoc.is_primary" class="cust-badge badge-active" style="font-size:10px">Primary</span></div>
-                <div style="font-size:12px; color:var(--ink-muted)">{{ spoc.email || '⚠ No email - cannot receive' }}</div>
-                <div style="font-size:12px; color:var(--ink-muted)">{{ spoc.phone || '' }}</div>
+            
+            <!-- Only show ACTIVE PRIMARY SPOC -->
+            <div v-if="primaryActiveSpoc" style="display:flex; flex-direction:column; gap:8px">
+              <div 
+                @click="selectSpoc(primaryActiveSpoc)" 
+                style="padding:12px; border:1.5px solid var(--teal-deep); border-radius:10px; cursor:pointer; background:var(--teal-pale)"
+              >
+                <div style="font-weight:600; font-size:14px">
+                  {{ primaryActiveSpoc.name }} 
+                  <span class="cust-badge badge-active" style="font-size:10px">Primary</span>
+                </div>
+                <div style="font-size:12px; color:var(--ink-muted)">{{ primaryActiveSpoc.email }}</div>
+                <div style="font-size:12px; color:var(--ink-muted)">{{ primaryActiveSpoc.phone || '' }}</div>
+                <div style="font-size:11px; color:var(--teal-deep); margin-top:4px; font-weight:600">✓ Active Primary SPOC - Ready to receive vouchers</div>
               </div>
             </div>
+            
+            <div v-else-if="selectedCustomer.spocs && selectedCustomer.spocs.length > 0" class="cust-empty" style="padding:16px; background:#fef3e2; border:1px solid #fde68a; border-radius:8px">
+              ⚠ No Active Primary SPOC found for this customer.<br>
+              <small>Please set an Active Primary SPOC in the Customers module before placing an order.</small>
+            </div>
+            
+            <div v-else class="cust-empty">No SPOCs found for this customer.</div>
           </div>
         </div>
 
@@ -60,7 +75,18 @@
           <div v-if="selectedCustomer" style="background:var(--surface-2); border-radius:10px; padding:12px; margin:12px 0">
             <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0"><span>Balance before</span><span>₹{{ fmt(selectedCustomer.balance) }}</span></div>
             <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0"><span>Order total</span><span>₹{{ fmt(store.cartTotal) }}</span></div>
-            <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0; font-weight:700" :style="balanceShortfall>0 ? 'color:#b91c1c' : 'color:var(--teal-deep)'"><span>Balance after</span><span>₹{{ fmt(selectedCustomer.balance - store.cartTotal) }}</span></div>
+            <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0; font-weight:700" :style="balanceShortfall > 0 ? 'color:#b91c1c' : 'color:var(--teal-deep)'">
+              <span>Balance after</span>
+              <span>₹{{ fmt(selectedCustomer.balance - store.cartTotal) }}</span>
+            </div>
+          </div>
+
+          <!-- Balance validation warning -->
+          <div v-if="balanceShortfall > 0" style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; margin:12px 0; color:#b91c1c">
+            <strong>⚠ Insufficient Balance</strong><br>
+            Order total (₹{{ fmt(store.cartTotal) }}) exceeds customer balance (₹{{ fmt(selectedCustomer.balance) }}).<br>
+            Shortfall: ₹{{ fmt(balanceShortfall) }}<br>
+            <small>Remove items from cart or add balance to customer before proceeding.</small>
           </div>
 
           <p v-if="error" class="form-error" style="color:#b91c1c; background:#fef2f2; padding:10px; border-radius:8px; font-size:13px">{{ error }}</p>
@@ -84,32 +110,77 @@ import axios from 'axios';
 
 const store = useSendVoucherStore();
 const router = useRouter();
-const customerSearch=ref(''); const customers=ref([]); const selectedCustomer=ref(null); const selectedSpoc=ref(null); const loading=ref(false); const error=ref(''); let timer=null;
+const customerSearch = ref(''); 
+const customers = ref([]); 
+const selectedCustomer = ref(null); 
+const selectedSpoc = ref(null); 
+const loading = ref(false); 
+const error = ref(''); 
+let timer = null;
 
-const balanceShortfall=computed(()=> selectedCustomer.value ? store.cartTotal - selectedCustomer.value.balance : 0);
-const canProceed=computed(()=> selectedCustomer.value && selectedSpoc.value && store.cart.length>0);
+const balanceShortfall = computed(() => selectedCustomer.value ? store.cartTotal - selectedCustomer.value.balance : 0);
+
+// Only allow proceed if: customer selected, primary active SPOC selected, cart not empty, balance sufficient
+const canProceed = computed(() => 
+  selectedCustomer.value && 
+  primaryActiveSpoc.value && 
+  store.cart.length > 0 && 
+  balanceShortfall.value <= 0
+);
+
+// Get the active primary SPOC
+const primaryActiveSpoc = computed(() => {
+  if (!selectedCustomer.value?.spocs) return null;
+  return selectedCustomer.value.spocs.find(s => s.is_primary && s.status === 'active') || null;
+});
 
 function searchCustomers(){
   clearTimeout(timer);
-  timer=setTimeout(async()=>{
-    if(!customerSearch.value || customerSearch.value.length<2) return;
-    const token=localStorage.getItem('avirqo_access_token');
-    const base=import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
-    try{ const {data}=await axios.get(`${base}/customers`,{params:{search:customerSearch.value}, headers:{Authorization:`Bearer ${token}`}}); customers.value=data.data||data; }catch(e){ console.error(e); }
-  },300);
+  timer = setTimeout(async()=>{
+    if(!customerSearch.value || customerSearch.value.length < 2) return;
+    const token = localStorage.getItem('avirqo_access_token');
+    const base = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+    try{ 
+      const {data} = await axios.get(`${base}/customers`, {
+        params: { search: customerSearch.value }, 
+        headers: { Authorization: `Bearer ${token}` }
+      }); 
+      customers.value = data.data || data; 
+    } catch(e){ 
+      console.error(e); 
+    }
+  }, 300);
 }
+
 async function selectCustomer(c){
-  const token=localStorage.getItem('avirqo_access_token');
-  const base=import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
-  const {data}=await axios.get(`${base}/customers/${c.id}`,{headers:{Authorization:`Bearer ${token}`}});
-  selectedCustomer.value=data; selectedSpoc.value=data.spocs?.length===1 ? data.spocs[0] : null;
+  const token = localStorage.getItem('avirqo_access_token');
+  const base = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+  const {data} = await axios.get(`${base}/customers/${c.id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  selectedCustomer.value = data; 
+  // Auto-select the active primary SPOC if exists
+  selectedSpoc.value = data.spocs?.find(s => s.is_primary && s.status === 'active') || null;
 }
-function selectSpoc(s){ selectedSpoc.value=s; }
+
+function selectSpoc(s){ 
+  selectedSpoc.value = s; 
+}
+
 async function proceed(){
-  loading.value=true; error.value='';
-  try{ await store.validateCart(); sessionStorage.setItem('avq_sendv_customer', JSON.stringify(selectedCustomer.value)); sessionStorage.setItem('avq_sendv_spoc', JSON.stringify(selectedSpoc.value)); router.push('/send-vouchers/confirm'); }
-  catch(e){ error.value=e.response?.data?.message || 'Validation failed - check stock'; }
-  finally{ loading.value=false; }
+  loading.value = true; 
+  error.value = '';
+  try{ 
+    await store.validateCart(); 
+    sessionStorage.setItem('avq_sendv_customer', JSON.stringify(selectedCustomer.value)); 
+    sessionStorage.setItem('avq_sendv_spoc', JSON.stringify(selectedSpoc.value)); 
+    router.push('/send-vouchers/confirm'); 
+  } catch(e){ 
+    error.value = e.response?.data?.message || 'Validation failed - check stock'; 
+  } finally{ 
+    loading.value = false; 
+  }
 }
-function fmt(n){ return Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+
+function fmt(n){ return Number(n||0).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
 </script>

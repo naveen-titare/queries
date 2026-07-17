@@ -15,7 +15,9 @@
         <RouterLink class="avq-nav-item" to="/send-vouchers" active-class="active">
         <span class="avq-nav-icon">📨</span> Send Vouchers
         </RouterLink>
-        <a class="avq-nav-item" href="#"><span class="avq-nav-icon">📊</span> Reports</a>
+        <RouterLink class="avq-nav-item" to="/order-history" active-class="active">
+        <span class="avq-nav-icon">📋</span> Order History
+        </RouterLink>
         <a class="avq-nav-item" href="#"><span class="avq-nav-icon">⚙️</span> Settings</a>
       </nav>
       <button class="avq-sidebar-logout" @click="handleLogout">↩ Log out</button>

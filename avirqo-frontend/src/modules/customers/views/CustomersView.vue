@@ -97,11 +97,65 @@
               <h4>SPOCs (Contacts)</h4>
               <button type="button" class="avq-btn-sm" @click="addSpoc">+ Add SPOC</button>
             </div>
-            <div v-for="(spoc, i) in form.spocs" :key="i" class="spoc-row">
-              <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
-              <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
-              <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
-              <button v-if="form.spocs.length > 1" type="button" class="avq-btn-sm btn-danger" @click="removeSpoc(i)">✕</button>
+            
+            <!-- EXISTING SPOCs (from database) -->
+            <template v-if="editId && existingSpocs.length">
+              <div class="spoc-subsection">
+                <h5 class="spoc-subtitle">Existing SPOCs</h5>
+                <div v-for="(spoc, idx) in existingSpocs" :key="spoc.id" class="spoc-row existing-spoc">
+                  <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
+                  <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
+                  <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
+                  
+                  <!-- Status Select -->
+                  <select v-model="spoc.status" class="avq-input" style="width:140px">
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                  
+                  <!-- Primary Badge & Toggle -->
+                  <div class="spoc-primary-cell" style="display:flex; align-items:center; gap:8px; min-width:120px">
+                    <span v-if="spoc.is_primary" class="spoc-primary">Primary</span>
+                    <button 
+                      v-else 
+                      type="button" 
+                      class="avq-btn-sm" 
+                      style="padding:4px 10px; font-size:11px"
+                      @click="makePrimary(spoc)"
+                      :disabled="spoc.status !== 'active'"
+                    >Set Primary</button>
+                  </div>
+                  
+                  <!-- Edit/Delete Actions -->
+                  <div class="spoc-actions" style="display:flex; gap:6px; align-items:center">
+                    <button 
+                      type="button" 
+                      class="avq-btn-sm btn-danger" 
+                      @click="removeExistingSpoc(spoc)"
+                      :disabled="spoc.is_primary"
+                      :title="spoc.is_primary ? 'Primary SPOC cannot be removed. Set another as primary first.' : ''"
+                    >✕</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- NEW SPOCs (being added) -->
+            <div class="spoc-subsection" v-if="newSpocs.length">
+              <h5 class="spoc-subtitle">New SPOCs</h5>
+              <div v-for="(spoc, i) in newSpocs" :key="i" class="spoc-row new-spoc">
+                <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
+                <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
+                <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
+                <button type="button" class="avq-btn-sm btn-danger" @click="removeNewSpoc(i)">✕</button>
+              </div>
+            </div>
+
+            <!-- Add New SPOC Button -->
+            <div class="spoc-add-row" style="margin-top:8px">
+              <button type="button" class="avq-btn-sm" @click="addSpoc" style="width:100%; justify-content:center">
+                + Add New SPOC
+              </button>
             </div>
           </div>
 
@@ -136,7 +190,6 @@
             <button class="avq-btn-ghost" @click="showDetail = false">✕ Close</button>
           </div>
 
-
           <!-- Company Details -->
           <div class="drawer-section">
             <h4>Company Details</h4>
@@ -160,14 +213,16 @@
             </div>
           </div>
 
-          <!-- SPOCs -->
+          <!-- SPOCs (Only Active) -->
           <div class="drawer-section">
-            <h4>SPOCs</h4>
-            <div v-for="spoc in store.current.spocs" :key="spoc.id" class="spoc-card">
+            <h4>SPOCs (Active Only)</h4>
+            <div v-if="activeSpocs.length === 0" class="cust-empty">No active SPOCs.</div>
+            <div v-for="spoc in activeSpocs" :key="spoc.id" class="spoc-card">
               <strong>{{ spoc.name }}</strong>
               <span v-if="spoc.is_primary" class="spoc-primary">Primary</span>
               <div class="spoc-detail">{{ spoc.email }}</div>
               <div v-if="spoc.phone" class="spoc-detail">{{ spoc.phone }}</div>
+              <span class="spoc-status-badge" :class="`badge-${spoc.status}`">{{ spoc.status }}</span>
             </div>
           </div>
 
@@ -267,7 +322,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { useCustomerStore } from '../store/customerStore';
 import customerApi from '../api/customerApi';
 import AppLayout from '../../shared/components/AppLayout.vue';
@@ -281,7 +336,19 @@ const showForm = ref(false);
 const editId = ref(null);
 const formLoading = ref(false);
 const formError = ref('');
-const form = reactive({ company_name: '', location: '', gst_number: '', registration_number: '', spocs: [{ name: '', email: '', phone: '' }] });
+
+// Form state
+const form = reactive({ 
+  company_name: '', 
+  location: '', 
+  gst_number: '', 
+  registration_number: '', 
+  spocs: [{ name: '', email: '', phone: '' }] 
+});
+
+// Computed: Separate existing SPOCs (with ID) from new SPOCs (without ID)
+const existingSpocs = computed(() => form.spocs.filter(s => s.id));
+const newSpocs = computed(() => form.spocs.filter(s => !s.id));
 
 const showDetail = ref(false);
 const showBalance = ref(false);
@@ -290,6 +357,11 @@ const balanceAmount = ref('');
 const balanceNote = ref('');
 const balanceLoading = ref(false);
 const balanceError = ref('');
+
+// Detail view: Only active SPOCs
+const activeSpocs = computed(() => 
+  store.current?.spocs?.filter(s => s.status === 'active') || []
+);
 
 onMounted(() => loadList());
 
@@ -301,7 +373,13 @@ function statusLabel(s) { return { active: 'Active', on_hold: 'On Hold', inactiv
 
 function openCreate() {
   editId.value = null;
-  Object.assign(form, { company_name: '', location: '', gst_number: '', registration_number: '', spocs: [{ name: '', email: '', phone: '' }] });
+  Object.assign(form, { 
+    company_name: '', 
+    location: '', 
+    gst_number: '', 
+    registration_number: '', 
+    spocs: [{ name: '', email: '', phone: '' }] 
+  });
   formError.value = '';
   showForm.value = true;
 }
@@ -311,25 +389,96 @@ async function openEdit(id) {
   editId.value = id;
   const c = store.current;
   Object.assign(form, {
-    company_name: c.company_name, location: c.location,
-    gst_number: c.gst_number || '', registration_number: c.registration_number || '',
-    spocs: c.spocs?.length ? c.spocs.map((s) => ({ name: s.name, email: s.email, phone: s.phone || '' })) : [{ name: '', email: '', phone: '' }],
+    company_name: c.company_name, 
+    location: c.location,
+    gst_number: c.gst_number || '', 
+    registration_number: c.registration_number || '',
+    spocs: c.spocs?.length ? c.spocs.map((s) => ({ 
+      id: s.id,
+      name: s.name, 
+      email: s.email, 
+      phone: s.phone || '',
+      status: s.status || 'active',
+      is_primary: s.is_primary || false
+    })) : [{ name: '', email: '', phone: '' }],
   });
   formError.value = '';
   showForm.value = true;
 }
 
-function addSpoc() { form.spocs.push({ name: '', email: '', phone: '' }); }
-function removeSpoc(i) { form.spocs.splice(i, 1); }
+function addSpoc() { 
+  form.spocs.push({ name: '', email: '', phone: '' }); 
+}
+
+function removeSpoc(i) { 
+  form.spocs.splice(i, 1); 
+}
+
+function removeNewSpoc(i) {
+  const idx = form.spocs.findIndex(s => !s.id);
+  if (idx >= 0) form.spocs.splice(idx, 1);
+}
+
+function removeExistingSpoc(spoc) {
+  if (spoc.is_primary) {
+    formError.value = 'Primary SPOC cannot be removed. Set another as primary first.';
+    return;
+  }
+  form.spocs = form.spocs.filter(s => s.id !== spoc.id);
+}
+
+function makePrimary(spoc) {
+  if (spoc.status !== 'active') {
+    formError.value = 'Only active SPOCs can be set as primary.';
+    return;
+  }
+  // Remove primary from all others
+  form.spocs.forEach(s => { s.is_primary = false; });
+  // Set this as primary
+  spoc.is_primary = true;
+}
 
 async function submitForm() {
   formLoading.value = true;
   formError.value = '';
+  
+  // Validation: At least one active SPOC required
+  const activeCount = form.spocs.filter(s => s.status === 'active').length;
+  if (activeCount === 0) {
+    formError.value = 'At least one active SPOC is required.';
+    formLoading.value = false;
+    return;
+  }
+  
+  // Validation: Must have a primary SPOC
+  const hasPrimary = form.spocs.some(s => s.is_primary && s.status === 'active');
+  if (!hasPrimary) {
+    formError.value = 'An active primary SPOC is required.';
+    formLoading.value = false;
+    return;
+  }
+
   try {
+    // Prepare payload - include id for existing SPOCs
+    const payload = {
+      company_name: form.company_name,
+      location: form.location,
+      gst_number: form.gst_number || null,
+      registration_number: form.registration_number || null,
+      spocs: form.spocs.map(s => ({
+        id: s.id || undefined,
+        name: s.name,
+        email: s.email,
+        phone: s.phone || null,
+        status: s.status || 'active',
+        is_primary: s.is_primary || false
+      }))
+    };
+
     if (editId.value) {
-      await store.update(editId.value, { ...form });
+      await store.update(editId.value, payload);
     } else {
-      await store.create({ ...form });
+      await store.create(payload);
     }
     showForm.value = false;
     loadList();
@@ -382,12 +531,10 @@ function handleFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   pendingFile.value = file;
-  e.target.value = ''; // reset input so same file can be reselected if cancelled
+  e.target.value = '';
 }
 
-function cancelUpload() {
-  pendingFile.value = null;
-}
+function cancelUpload() { pendingFile.value = null; }
 
 async function confirmUpload() {
   if (!pendingFile.value) return;
@@ -407,7 +554,6 @@ async function confirmDeleteDoc(doc) {
   await store.deleteDocument(store.current.id, doc.id);
 }
 
-// Authenticated download — fetches with Bearer token then triggers browser save
 async function downloadDoc(doc) {
   try {
     const token = localStorage.getItem('avirqo_access_token');
@@ -426,6 +572,7 @@ async function downloadDoc(doc) {
     alert('Could not download the file. Please try again.');
   }
 }
+
 function formatSize(bytes) {
   if (!bytes) return '';
   if (bytes < 1024) return `${bytes} B`;
@@ -450,7 +597,9 @@ function formatSize(bytes) {
 .avq-btn-ghost:hover { background: var(--surface-2); }
 .avq-btn-sm { background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--border-2); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--fb); }
 .avq-btn-sm:hover { background: var(--teal-pale); }
+.avq-btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.btn-danger:hover { background: #fee2e2; }
 
 .cust-table-wrap { background: #fff; border: 1px solid var(--border-2); border-radius: 14px; overflow: hidden; }
 .cust-table { width: 100%; border-collapse: collapse; }
@@ -471,7 +620,7 @@ function formatSize(bytes) {
 .err { color: #b91c1c; }
 
 .avq-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
-.avq-modal { background: #fff; border-radius: 16px; padding: 36px; width: 100%; max-width: 780px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
+.avq-modal { background: #fff; border-radius: 16px; padding: 36px; width: 100%; max-width: 900px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
 .avq-modal-sm { max-width: 420px; }
 .avq-modal h3 { font-family: var(--fd); font-size: 22px; margin-bottom: 24px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
@@ -483,8 +632,16 @@ function formatSize(bytes) {
 .spoc-section { margin-bottom: 16px; }
 .spoc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .spoc-head h4 { font-size: 14px; font-weight: 700; }
-.spoc-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 8px; align-items: center; min-width: 0; }
+.spoc-row { display: grid; grid-template-columns: 1fr 1fr 1fr 140px 120px auto; gap: 8px; margin-bottom: 8px; align-items: center; min-width: 0; }
 .spoc-row .avq-input { width: 100%; box-sizing: border-box; min-width: 0; }
+.spoc-row select.avq-input { width: 100%; }
+.spoc-subsection { margin-bottom: 16px; }
+.spoc-subtitle { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border-2); }
+.existing-spoc { background: var(--surface-2); }
+.new-spoc { background: #f0fdf4; border-left: 3px solid var(--teal-mid); }
+.spoc-primary-cell { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.spoc-actions { display: flex; gap: 6px; align-items: center; }
+.spoc-add-row { padding-top: 8px; border-top: 1px dashed var(--border-2); }
 .doc-upload-note { font-size: 12px; color: var(--ink-muted); background: var(--surface-2); border-radius: 8px; padding: 10px 14px; margin-top: 8px; border: 1px dashed var(--border-2); }
 
 .avq-drawer { background: #fff; width: 100%; max-width: 680px; height: 100vh; overflow-y: auto; margin-left: auto; padding: 32px; }
@@ -499,6 +656,7 @@ function formatSize(bytes) {
 .spoc-card { border: 1px solid var(--border-2); border-radius: 8px; padding: 12px; margin-bottom: 8px; }
 .spoc-primary { background: var(--teal-pale); color: var(--teal-deep); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; margin-left: 8px; }
 .spoc-detail { font-size: 13px; color: var(--ink-muted); margin-top: 4px; }
+.spoc-status-badge { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 100px; font-size: 10px; font-weight: 700; }
 .doc-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-2); }
 .doc-pending { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--teal-pale); border: 1px solid var(--border-2); border-radius: 8px; margin-bottom: 10px; }
 .avq-btn-sm-p { padding: 6px 12px; font-size: 12px; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; font-family: var(--fb); background: var(--teal-deep); color: #fff; }
@@ -511,6 +669,7 @@ function formatSize(bytes) {
 .log-credit { color: var(--teal-deep); font-weight: 700; text-transform: uppercase; font-size: 11px; }
 .log-debit { color: #b91c1c; font-weight: 700; text-transform: uppercase; font-size: 11px; }
 </style>
+
 <style>
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail-item { display: flex; flex-direction: column; gap: 4px; }

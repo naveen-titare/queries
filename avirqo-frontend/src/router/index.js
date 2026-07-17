@@ -4,6 +4,7 @@ import customerRoutes from '../modules/customers/router';
 import voucherRoutes from '../modules/vouchers/router';
 import { useAuthStore } from '../modules/auth/store/authStore';
 import sendVoucherRoutes from '../modules/send-vouchers/router'; // NEW
+import orderHistoryRoutes from '../modules/order-history/router';
 
 
 const routes = [
@@ -11,6 +12,7 @@ const routes = [
   ...customerRoutes,
   ...voucherRoutes,
   ...sendVoucherRoutes,
+  ...orderHistoryRoutes,
 
   {
     path: '/dashboard',

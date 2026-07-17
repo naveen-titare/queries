@@ -103,6 +103,7 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
       return await sendVoucherApi.validateCart(items);
     },
 
+    // Legacy direct order placement (without OTP) - kept for backward compatibility
     async placeOrder(customerId, spocId) {
       const items = this.cart.map(i => ({
         product_id: i.product_id,
@@ -111,6 +112,31 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
       }));
       const { data } = await sendVoucherApi.placeOrder({ customer_id: customerId, spoc_id: spocId, items });
       this.clearCart();
+      return data;
+    },
+
+    // NEW: Step 1 - Initiate Order & Send OTP
+    async initiateOrder(customerId, spocId, items) {
+      const { data } = await sendVoucherApi.initiateOrder({ customer_id: customerId, spoc_id: spocId, items });
+      return data;
+    },
+
+    // NEW: Step 2 - Verify OTP & Complete Order
+    async verifyOrderOtp(orderNumber, otp) {
+      const { data } = await sendVoucherApi.verifyOrderOtp(orderNumber, otp);
+      this.clearCart();
+      return data;
+    },
+
+    // NEW: Resend OTP
+    async resendOrderOtp(orderNumber) {
+      const { data } = await sendVoucherApi.resendOrderOtp(orderNumber);
+      return data;
+    },
+
+    // NEW: Cancel order and restore balance
+    async cancelOrder(orderNumber) {
+      const { data } = await sendVoucherApi.cancelOrder(orderNumber);
       return data;
     },
 
