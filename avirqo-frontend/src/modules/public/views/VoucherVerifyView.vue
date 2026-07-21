@@ -14,7 +14,7 @@
           <input 
             v-model="codeId" 
             type="text" 
-            placeholder="Enter Code ID (e.g., 12345)"
+            placeholder="Enter Code ID (e.g., gY7bW19)"
             @keyup.enter="verify"
             :disabled="loading"
           />

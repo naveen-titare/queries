@@ -5,18 +5,31 @@ namespace App\Http\Controllers\Api\SendVouchers;
 use App\Http\Controllers\Controller;
 use App\Models\SendVoucherCode;
 use Illuminate\Http\Request;
+use Hashids\Hashids;
 
 class PublicCodeVerificationController extends Controller
 {
     /**
-     * Public endpoint to verify a voucher code by its ID.
+     * Public endpoint to verify a voucher code by its hashed ID.
      * No authentication required.
      * 
      * GET /api/public/send-vouchers/codes/verify/{id}
      */
     public function verify($id)
     {
-        $code = SendVoucherCode::with('product')->find($id);
+        // Initialize Hashids with the matching salt and key constraints
+        $hashids = new Hashids(env('HASHIDS_SALT', 'avirqo_fallback_salt_key'), 7);
+        $decoded = $hashids->decode($id);
+
+        if (empty($decoded)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid Verification Code ID format. Please check and try again.',
+            ], 400);
+        }
+
+        $realDatabaseId = $decoded[0];
+        $code = SendVoucherCode::with('product')->find($realDatabaseId);
 
         if (!$code) {
             return response()->json([
@@ -44,7 +57,7 @@ class PublicCodeVerificationController extends Controller
         return response()->json([
             'success' => true,
             'voucher' => [
-                'code_id' => $code->id,
+                'code_id' => $id,
                 'brand' => $code->product?->brand,
                 'product_name' => $code->product?->name,
                 'denomination' => $code->denomination,

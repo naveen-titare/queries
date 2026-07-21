@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Hashids\Hashids;
 
 /**
  * SendVoucherService - FINAL VERSION compatible with avirqo-customers module
@@ -1047,7 +1048,7 @@ class SendVoucherService
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Vouchers');
 
-        $headers = ['Brand Name','Product','Denomination','Currency','Voucher Code','PIN','Expiry Date','Code ID (for verification)'];
+        $headers = ['Brand Name','Product','Denomination','Currency','Voucher Code','PIN','Expiry Date','Avirqo ID (for verification)'];
         foreach ($headers as $col => $h) {
             $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col+1).'1';
             $sheet->setCellValue($cell, $h);
@@ -1055,6 +1056,9 @@ class SendVoucherService
             $sheet->getStyle($cell)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB('FF1D9E75');
             $sheet->getStyle($cell)->getFont()->getColor()->setARGB('FFFFFFFF');
         }
+
+        // Initialize Hashids with a secure salt and minimum length of 7 characters
+        $hashids = new Hashids(env('HASHIDS_SALT', 'avirqo_fallback_salt_key'), 7);
 
         foreach ($codes as $r => $c) {
             $row = $r+2;
@@ -1065,15 +1069,18 @@ class SendVoucherService
             $sheet->setCellValue("E{$row}", $c['code']);
             $sheet->setCellValue("F{$row}", $c['pin'] ?? '');
             $sheet->setCellValue("G{$row}", $c['expiry_date']);
-            // Code ID column (H) - for verification against database
-            $sheet->setCellValue("H{$row}", $c['code_id'] ?? '');
+            
+            // Encode code_id to a 7-character hashed ID
+            $hashedCodeId = isset($c['code_id']) ? $hashids->encode($c['code_id']) : '';
+            $sheet->setCellValue("H{$row}", $hashedCodeId);
+            
             $sheet->getStyle("E{$row}")->getNumberFormat()->setFormatCode('@');
             $sheet->getStyle("H{$row}")->getNumberFormat()->setFormatCode('@');
         }
 
         foreach (range('A','H') as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
-        // Hide the Code ID column by default (user can unhide if needed)
-        $sheet->getColumnDimension('H')->setVisible(false);
+        // Make the Avirqo ID column (H) visible by default
+        $sheet->getColumnDimension('H')->setVisible(true);
 
         // Sheet 2: Verification Info
         $verifySheet = $spreadsheet->createSheet();
@@ -1094,11 +1101,9 @@ class SendVoucherService
             ['Verification Hash (SHA256)', $this->computeCodesHash(array_column($codes, 'code_id'))],
             ['Generated At', now()->format('Y-m-d H:i:s')],
             ['', ''],
-            ['Instructions', ''],
-            ['1. Copy the "Code ID (for verification)" column from Vouchers sheet', ''],
-            ['2. Use API: POST /api/send-vouchers/orders/{id}/verify', ''],
-            ['3. Body: { "code_ids": [comma-separated IDs] }', ''],
-            ['4. Response will confirm if codes match database', ''],
+            ['Instructions:', ''],
+            ['1. Open https://app.avirqo.in/verify and provide Avirqo ID to verify the voucher code.', ''],
+            ['2. For each voucher, you will find the Avirqo ID in the Last column of the Vouchers sheet.', ''],
         ];
         
         foreach ($verifyData as $r => $rowData) {
