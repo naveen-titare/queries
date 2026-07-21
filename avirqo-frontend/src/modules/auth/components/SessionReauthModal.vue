@@ -1,4 +1,3 @@
-cat > ~/avirqo/avirqo-frontend/src/modules/auth/components/SessionReauthModal.vue << 'EOF'
 <template>
   <Teleport to="body">
     <div v-if="bannerVisible && !modalVisible" class="sreauth-banner" @click="showModal">
@@ -97,6 +96,12 @@ onMounted(() => {
   // Check if interceptor already fired before this component mounted
   if (auth.pendingReauth) {
     dismissed.value = false;
+    triggerExpiry();
+  }
+
+  if (auth.accessToken && auth.isAccessTokenExpired && auth.reauthToken) {
+    alreadyTriggered = true;
+    auth.pendingReauth = true;
     triggerExpiry();
   }
 
@@ -207,4 +212,3 @@ async function handleLogout() {
 .sreauth-dismiss { background: none; border: none; color: #085041; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', system-ui, sans-serif; text-decoration: underline; }
 .sreauth-logout { background: none; border: none; color: #6B6A67; font-size: 13px; cursor: pointer; font-family: 'DM Sans', system-ui, sans-serif; text-decoration: underline; }
 </style>
-EOF

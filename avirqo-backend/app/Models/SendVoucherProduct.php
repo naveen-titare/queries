@@ -17,7 +17,8 @@ class SendVoucherProduct extends Model
         'terms_and_conditions', 'redemption_instructions', 'expiry_and_validity',
         'order_quantity_limit', 'tat_in_days',
         'fee', 'discount', 'exchange_rate', 'redemption_fee', 'redemption_fee_type',
-        'low_stock_threshold', 'is_active',
+        'low_stock_threshold', 'is_active', 'global_margin_percentage',
+        'is_blacklisted',
     ];
 
     protected $casts = [
@@ -29,11 +30,18 @@ class SendVoucherProduct extends Model
         'fee' => 'decimal:4',
         'discount' => 'decimal:4',
         'exchange_rate' => 'decimal:4',
+        'global_margin_percentage' => 'decimal:2',
+        'is_blacklisted' => 'boolean',
     ];
 
     public function codes()
     {
         return $this->hasMany(SendVoucherCode::class, 'product_id');
+    }
+
+    public function campaignSettings()
+    {
+        return $this->hasMany(VoucherCampaignProduct::class, 'product_id');
     }
 
     public function availableCodesCount(float $denomination): int

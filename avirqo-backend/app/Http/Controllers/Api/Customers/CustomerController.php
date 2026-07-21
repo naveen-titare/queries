@@ -26,21 +26,29 @@ class CustomerController extends Controller
             'location'            => ['required', 'string', 'max:255'],
             'gst_number'          => ['nullable', 'string', 'max:20'],
             'registration_number' => ['nullable', 'string', 'max:100'],
-            'spocs'               => ['required', 'array', 'min:1'],
+            'voucher_campaign_id' => ['nullable', 'integer', 'exists:voucher_campaigns,id'],
+            'spocs'               => ['sometimes', 'array', 'min:0'],
             'spocs.*.name'        => ['required', 'string'],
             'spocs.*.email'       => ['required', 'email'],
             'spocs.*.phone'       => ['nullable', 'string'],
+            
         ]);
 
         $customer = $this->service->create($data);
 
-        return response()->json($customer, 201);
+        // Sync campaign mapping via pivot table
+        $campaignId = $data['voucher_campaign_id'] ?? null;
+        if ($campaignId) {
+            $customer->voucherCampaigns()->sync([$campaignId]);
+        }
+
+        return response()->json($customer->load('voucherCampaigns'), 201);
     }
 
     public function show(Customer $customer)
     {
         return response()->json(
-            $customer->load(['spocs', 'documents.uploadedBy', 'balanceLogs.doneBy', 'voucherHistory.sentBy'])
+            $customer->load(['spocs', 'documents.uploadedBy', 'balanceLogs.doneBy', 'voucherHistory.sentBy', 'voucherCampaigns'])
         );
     }
 
@@ -51,17 +59,26 @@ class CustomerController extends Controller
             'location'            => ['sometimes', 'string', 'max:255'],
             'gst_number'          => ['nullable', 'string', 'max:20'],
             'registration_number' => ['nullable', 'string', 'max:100'],
+            'voucher_campaign_id' => ['nullable', 'integer', 'exists:voucher_campaigns,id'],
             'spocs'               => ['sometimes', 'array', 'min:1'],
             'spocs.*.id'          => ['sometimes', 'integer', 'exists:customer_spocs,id'],
             'spocs.*.name'        => ['required_with:spocs', 'string'],
             'spocs.*.email'       => ['required_with:spocs', 'email'],
             'spocs.*.phone'       => ['nullable', 'string'],
             'spocs.*.status'      => ['sometimes', 'in:active,inactive'],
+            'spocs.*.is_primary'  => ['sometimes', 'boolean'],
         ]);
 
         $customer = $this->service->update($customer, $data);
 
-        return response()->json($customer);
+        // Sync campaign mapping only when the field is explicitly present.
+        // This prevents SPOC-only updates from clearing the customer's campaign assignment.
+        if (array_key_exists('voucher_campaign_id', $data)) {
+            $campaignId = $data['voucher_campaign_id'] ?? null;
+            $customer->voucherCampaigns()->sync($campaignId ? [$campaignId] : []);
+        }
+
+        return response()->json($customer->load('voucherCampaigns'));
     }
 
     /**

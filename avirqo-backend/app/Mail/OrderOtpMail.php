@@ -18,7 +18,8 @@ class OrderOtpMail extends Mailable
         public Customer $customer,
         public CustomerSpoc $spoc,
         public string $otp,
-        public array $itemsSummary
+        public array $itemsSummary,
+        public ?string $draftInvoicePdf = null,
     ) {}
 
     public function build()
@@ -26,7 +27,7 @@ class OrderOtpMail extends Mailable
         $totalAmount = collect($this->itemsSummary)->sum('total');
         $totalQuantity = collect($this->itemsSummary)->sum('quantity');
 
-        return $this->subject('🔐 OTP Verification Required: Send Voucher Order #' . $this->order->order_number)
+        $mail = $this->subject('🔐 OTP Verification Required: Send Voucher Order #' . $this->order->order_number)
             ->view('emails.order-otp', [
                 'order' => $this->order,
                 'customer' => $this->customer,
@@ -36,5 +37,11 @@ class OrderOtpMail extends Mailable
                 'totalAmount' => $totalAmount,
                 'totalQuantity' => $totalQuantity,
             ]);
+
+        if ($this->draftInvoicePdf) {
+            $mail->attachData($this->draftInvoicePdf, "Draft-Tax-Invoice-{$this->order->order_number}.pdf", ['mime' => 'application/pdf']);
+        }
+
+        return $mail;
     }
 }

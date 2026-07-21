@@ -7,18 +7,18 @@ export default [
     path: '/send-vouchers',
     name: 'send-vouchers',
     component: SendVoucherCatalogView,
-    meta: { requiresAuth: true, title: 'Send Vouchers' },
+    meta: { requiresAuth: true, requiredModule: 'send_vouchers', title: 'Send Vouchers' },
   },
   {
     path: '/send-vouchers/send',
     name: 'send-vouchers-send',
     component: SendVoucherSendView,
-    meta: { requiresAuth: true, title: 'Send Vouchers - Select Customer' },
+    meta: { requiresAuth: true, requiredModule: 'send_vouchers', title: 'Send Vouchers - Select Customer' },
   },
   {
     path: '/send-vouchers/confirm',
     name: 'send-vouchers-confirm',
     component: SendVoucherConfirmView,
-    meta: { requiresAuth: true, title: 'Send Vouchers - Confirm' },
+    meta: { requiresAuth: true, requiredModule: 'send_vouchers', title: 'Send Vouchers - Confirm' },
   },
 ];

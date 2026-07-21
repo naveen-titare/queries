@@ -59,7 +59,13 @@ class TwoFactorController extends Controller
         $reauthToken = $this->sessionTokens->issueReauthToken($user);
 
         return response()->json([
-            'user' => ['id' => $user->id, 'name' => $user->name, 'email' => $user->email],
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'is_admin' => (bool) $user->is_admin,
+                'module_access' => $user->effectiveModuleAccess(),
+            ],
             'access_token' => $access['access_token'],
             'access_token_expires_at' => $access['expires_at'],
             'reauth_token' => $reauthToken,
@@ -116,6 +122,13 @@ class TwoFactorController extends Controller
         $newReauthToken = $this->sessionTokens->issueReauthToken($user);
 
         return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'is_admin' => (bool) $user->is_admin,
+                'module_access' => $user->effectiveModuleAccess(),
+            ],
             'access_token' => $access['access_token'],
             'access_token_expires_at' => $access['expires_at'],
             'reauth_token' => $newReauthToken,

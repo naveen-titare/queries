@@ -12,12 +12,19 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
     error: null,
 
     // Cart — persisted in sessionStorage so it survives page refreshes
-    // Renamed key to avoid conflict with old 'vouchers' module
     cart: JSON.parse(sessionStorage.getItem('avirqo_send_vouchers_cart') || '[]'),
+
+    // Pending OTP order — persisted so the banner shows if the user navigates away
+    // from the confirm screen before verifying the OTP.
+    pendingOrder: JSON.parse(sessionStorage.getItem('avirqo_pending_order') || 'null'),
+    selectedPi: JSON.parse(sessionStorage.getItem('avq_sendv_pi') || 'null'),
   }),
 
   getters: {
-    cartTotal: (state) => state.cart.reduce((sum, i) => sum + i.denomination * i.quantity, 0),
+    cartGrossTotal: (state) => state.cart.reduce((sum, i) => sum + i.denomination * i.quantity, 0),
+    cartBaseTotal: (state) => state.cart.reduce((sum, i) => sum + i.denomination * i.quantity, 0),
+    cartDiscountTotal: (state) => state.cart.reduce((sum, i) => sum + i.denomination * i.quantity * (i.discount_percentage || 0) / 100, 0),
+    cartTotal: (state) => state.cart.reduce((sum, i) => sum + i.denomination * i.quantity * (1 - (i.discount_percentage || 0) / 100), 0),
     cartItemCount: (state) => state.cart.reduce((sum, i) => sum + i.quantity, 0),
   },
 
@@ -63,6 +70,8 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
           currency_code: product.currency_code,
           quantity,
           available: product.stock?.[denomination]?.available ?? 999,
+          discount_percentage: Number(product.customer_discount_percentage || 0),
+          global_margin_percentage: Number(product.global_margin_percentage || 0),
         });
       }
       this._saveCart();
@@ -90,22 +99,54 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
       sessionStorage.removeItem('avirqo_send_vouchers_cart');
     },
 
+    setPiCart(pi) {
+      this.selectedPi = pi;
+      sessionStorage.setItem('avq_sendv_pi', JSON.stringify(pi));
+      this.cart = (pi.items || [])
+        .filter(item => Number(item.pending_quantity || 0) > 0)
+        .map(item => {
+          const available = Number(item.available_stock || 0);
+          const pending = Number(item.pending_quantity || 0);
+          const quantity = Math.min(pending, available);
+          return {
+            key: `${item.product_id}-${item.denomination}`,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            brand: item.brand,
+            image_url: item.product?.image_url,
+            denomination: Number(item.denomination),
+            currency_code: item.currency_code || item.product?.currency_code || 'INR',
+            quantity,
+            available,
+            pi_pending_quantity: pending,
+            discount_percentage: Number(item.discount_percentage || 0),
+            global_margin_percentage: Number(item.product?.global_margin_percentage || 0),
+          };
+        });
+      this._saveCart();
+    },
+
+    clearSelectedPi() {
+      this.selectedPi = null;
+      sessionStorage.removeItem('avq_sendv_pi');
+    },
+
     _saveCart() {
       sessionStorage.setItem('avirqo_send_vouchers_cart', JSON.stringify(this.cart));
     },
 
-    async validateCart() {
-      const items = this.cart.map(i => ({
+    async validateCart(customerId, pricingMode = 'product', proformaInvoiceId = null) {
+      const items = this.cart.filter(i => Number(i.quantity || 0) > 0).map(i => ({
         product_id: i.product_id,
         denomination: i.denomination,
         quantity: i.quantity,
       }));
-      return await sendVoucherApi.validateCart(items);
+      return await sendVoucherApi.validateCart(items, customerId, pricingMode, proformaInvoiceId);
     },
 
     // Legacy direct order placement (without OTP) - kept for backward compatibility
     async placeOrder(customerId, spocId) {
-      const items = this.cart.map(i => ({
+      const items = this.cart.filter(i => Number(i.quantity || 0) > 0).map(i => ({
         product_id: i.product_id,
         denomination: i.denomination,
         quantity: i.quantity,
@@ -116,8 +157,16 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
     },
 
     // NEW: Step 1 - Initiate Order & Send OTP
-    async initiateOrder(customerId, spocId, items) {
-      const { data } = await sendVoucherApi.initiateOrder({ customer_id: customerId, spoc_id: spocId, items });
+    async initiateOrder(customerId, spocId, items, pricingMode = 'product', invoiceDiscountPercentage = 0, proformaInvoiceId = null) {
+      const { data } = await sendVoucherApi.initiateOrder({ customer_id: customerId, spoc_id: spocId, proforma_invoice_id: proformaInvoiceId, items, pricing_mode: pricingMode, invoice_discount_percentage: invoiceDiscountPercentage });
+      // Persist pending order so the banner shows if the user navigates away
+      this.setPendingOrder({
+        orderNumber: data.order.order_number,
+        orderId: data.order.id,
+        customerName: data.order.customer?.company_name,
+        spocEmail: data.order.email_sent_to,
+        total: data.order.total_amount,
+      });
       return data;
     },
 
@@ -125,6 +174,8 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
     async verifyOrderOtp(orderNumber, otp) {
       const { data } = await sendVoucherApi.verifyOrderOtp(orderNumber, otp);
       this.clearCart();
+      this.clearSelectedPi();
+      this.clearPendingOrder();
       return data;
     },
 
@@ -137,7 +188,30 @@ export const useSendVoucherStore = defineStore('send-vouchers', {
     // NEW: Cancel order and restore balance
     async cancelOrder(orderNumber) {
       const { data } = await sendVoucherApi.cancelOrder(orderNumber);
+      this.clearPendingOrder();
       return data;
+    },
+
+    // Persist pending order for cross-page banner
+    setPendingOrder(order) {
+      this.pendingOrder = order;
+      sessionStorage.setItem('avirqo_pending_order', JSON.stringify(order));
+    },
+
+    clearPendingOrder() {
+      this.pendingOrder = null;
+      sessionStorage.removeItem('avirqo_pending_order');
+    },
+
+    // Check if pending order is still pending_otp
+    async checkPendingOrderStatus() {
+      if (!this.pendingOrder?.orderId) return null;
+      try {
+        const { data } = await sendVoucherApi.getOrder(this.pendingOrder.orderId);
+        return data.status;
+      } catch (e) {
+        return null;
+      }
     },
 
     async fetchOrders(params = {}) {

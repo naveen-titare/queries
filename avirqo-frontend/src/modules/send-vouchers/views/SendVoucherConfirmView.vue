@@ -13,16 +13,17 @@
         <div class="cust-table-wrap" style="padding:20px">
           <h3 style="font-size:14px; font-weight:700; margin-bottom:12px">Order Summary - One email per SPOC, all vouchers as Excel attachment</h3>
           <table class="cust-table">
-            <thead><tr><th>PRODUCT</th><th>DENOMINATION</th><th>QTY</th><th style="text-align:right">TOTAL</th></tr></thead>
+            <thead><tr><th>PRODUCT</th><th>DENOMINATION</th><th>QTY</th><th>DISCOUNT</th><th style="text-align:right">TOTAL</th></tr></thead>
             <tbody>
               <tr v-for="item in cart" :key="item.key">
                 <td><div style="display:flex; gap:8px; align-items:center"><div style="width:28px; height:28px; background:var(--surface-2); border:1px solid var(--border-2); border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px">{{ item.brand.charAt(0) }}</div><span>{{ item.product_name }} <small style="color:var(--ink-muted)">{{ item.brand }}</small></span></div></td>
                 <td>{{ item.currency_code }} {{ fmt(item.denomination) }}</td>
                 <td>{{ item.quantity }}</td>
-                <td style="text-align:right" class="cust-balance">₹{{ fmt(item.denomination*item.quantity) }}</td>
+                <td>{{ item.discount_percentage || 0 }}%</td>
+                <td style="text-align:right" class="cust-balance">₹{{ fmt(item.denomination*item.quantity*(1-(item.discount_percentage||0)/100)) }}</td>
               </tr>
             </tbody>
-            <tfoot><tr><td colspan="3" style="text-align:right; font-weight:700">Total ({{ cart.length }} brands, {{ store.cartItemCount }} codes)</td><td style="text-align:right; font-weight:700; font-size:18px" class="cust-balance">₹{{ fmt(store.cartTotal) }}</td></tr></tfoot>
+            <tfoot><tr><td colspan="4" style="text-align:right; font-weight:700">Campaign discount</td><td style="text-align:right;color:var(--teal-deep)">− ₹{{ fmt(store.cartDiscountTotal) }}</td></tr><tr><td colspan="4" style="text-align:right; font-weight:700">Total after discount ({{ cart.length }} brands, {{ store.cartItemCount }} codes)</td><td style="text-align:right; font-weight:700; font-size:18px" class="cust-balance">₹{{ fmt(store.cartTotal) }}</td></tr></tfoot>
           </table>
           <p style="font-size:12px; color:var(--ink-muted); margin-top:8px">Excel will contain {{ store.cartItemCount }} rows: Brand | Product | Denom | Code (decrypted) | PIN | Expiry</p>
         </div>
@@ -48,7 +49,7 @@
             <span style="font-size:24px">🔐</span>
             <div>
               <strong style="font-size:16px">OTP Verification Required</strong>
-              <div style="font-size:13px; color:var(--ink-muted)">An OTP will be sent to <strong>{{ spoc?.email }}</strong>, <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong> with order summary.</div>
+              <div style="font-size:13px; color:var(--ink-muted)">An OTP will be sent to <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong> with order summary.</div>
             </div>
           </div>
           <div style="background:white; border-radius:8px; padding:16px; border:1px solid #86efac">
@@ -73,7 +74,7 @@
             <span style="font-size:24px">📧</span>
             <div>
               <strong style="font-size:16px">OTP Sent Successfully</strong>
-              <div style="font-size:13px; color:var(--ink-muted)">OTP sent to <strong>{{ spoc?.email }}</strong>, <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong>. Valid for 10 minutes.</div>
+              <div style="font-size:13px; color:var(--ink-muted)">OTP sent to <strong>naveentitare52@gmail.com</strong> and <strong>ptitare@gmail.com</strong>. Valid for 10 minutes.</div>
             </div>
           </div>
           
@@ -133,6 +134,20 @@
       </div>
     </div>
   </AppLayout>
+
+  <AppDialogModal
+    :open="showCancelModal"
+    title="Cancel order"
+    message="Cancel this order? Balance will be restored."
+    confirm-text="Cancel order"
+    cancel-text="Keep order"
+    variant="danger"
+    :loading="cancelSubmitting"
+    @cancel="showCancelModal = false"
+    @confirm="confirmCancelOtp"
+  >
+    <p v-if="cancelError" class="form-error" style="margin-top:16px">{{ cancelError }}</p>
+  </AppDialogModal>
 </template>
 
 <script setup>
@@ -140,6 +155,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useSendVoucherStore } from '../store/sendVoucherStore';
 import AppLayout from '../../shared/components/AppLayout.vue';
+import AppDialogModal from '../../shared/components/AppDialogModal.vue';
 
 const store = useSendVoucherStore();
 const router = useRouter();
@@ -164,6 +180,9 @@ const otpVerified = ref(false);
 const otp = ref('');
 const verifying = ref(false);
 const resending = ref(false);
+const showCancelModal = ref(false);
+const cancelSubmitting = ref(false);
+const cancelError = ref('');
 
 const cart = computed(() => store.cart);
 const balanceAfter = computed(() => (customer.value?.balance || 0) - store.cartTotal);
@@ -177,6 +196,17 @@ onMounted(() => {
   }
   customer.value = JSON.parse(c);
   spoc.value = JSON.parse(s);
+  
+  // Check for pending OTP order
+  const pendingOrder = sessionStorage.getItem('avq_pending_otp_order');
+  if (pendingOrder) {
+    const pending = JSON.parse(pendingOrder);
+    if (pending.customer_id === customer.value.id) {
+      // Show banner for pending OTP
+      otpSent.value = true;
+      orderNumber.value = pending.order_number;
+    }
+  }
 });
 
 // Step 1: Initiate Order & Send OTP
@@ -250,14 +280,22 @@ async function resendOtp() {
 
 // Cancel OTP flow - need to restore balance
 async function cancelOtp() {
-  if (!confirm('Cancel this order? Balance will be restored.')) return;
+  cancelError.value = '';
+  showCancelModal.value = true;
+}
+
+async function confirmCancelOtp() {
+  cancelSubmitting.value = true;
+  cancelError.value = '';
   error.value = '';
   try {
-    // Call backend to cancel order and restore balance
     await store.cancelOrder(orderNumber.value);
+    showCancelModal.value = false;
     router.push('/send-vouchers');
   } catch (e) {
-    error.value = e.response?.data?.message || 'Failed to cancel order';
+    cancelError.value = e.response?.data?.message || 'Failed to cancel order';
+  } finally {
+    cancelSubmitting.value = false;
   }
 }
 

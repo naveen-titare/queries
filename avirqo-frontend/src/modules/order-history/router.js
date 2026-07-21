@@ -5,6 +5,6 @@ export default [
     path: '/order-history',
     name: 'order-history',
     component: OrderHistoryView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiredModule: 'order_history', title: 'Order History' },
   },
 ];

@@ -14,6 +14,7 @@ export const useAuthStore = defineStore('auth', {
 
     setupToken: null,
     otpauthUrl: null,
+    userHydrated: false,
   }),
 
   getters: {
@@ -51,6 +52,20 @@ export const useAuthStore = defineStore('auth', {
       this.setupToken = null;
       this.otpauthUrl = null;
       return data;
+    },
+
+    async ensureUser() {
+      if (!this.accessToken || this.userHydrated) return this.user;
+      const { data } = await authApi.me();
+      if (data?.user) {
+        this.user = data.user;
+        localStorage.setItem('avirqo_user', JSON.stringify(data.user));
+      } else if (data?.id) {
+        this.user = data;
+        localStorage.setItem('avirqo_user', JSON.stringify(data));
+      }
+      this.userHydrated = true;
+      return this.user;
     },
 
     async requestReset() {
@@ -98,6 +113,7 @@ export const useAuthStore = defineStore('auth', {
       this.accessToken = data.access_token;
       this.accessTokenExpiresAt = data.access_token_expires_at;
       this.reauthToken = data.reauth_token;
+      this.userHydrated = true;
 
       localStorage.setItem('avirqo_access_token', data.access_token);
       localStorage.setItem('avirqo_access_expires', data.access_token_expires_at);
@@ -112,6 +128,7 @@ export const useAuthStore = defineStore('auth', {
       this.pendingReauth = false;
       this.setupToken = null;
       this.otpauthUrl = null;
+      this.userHydrated = false;
       localStorage.removeItem('avirqo_user');
       localStorage.removeItem('avirqo_access_token');
       localStorage.removeItem('avirqo_access_expires');

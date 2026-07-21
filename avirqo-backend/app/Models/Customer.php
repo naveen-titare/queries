@@ -7,6 +7,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Customer extends Model
 {
+    public function productSettings()
+    {
+        return $this->hasMany(CustomerProduct::class);
+    }
     use SoftDeletes;
 
     protected $fillable = [
@@ -40,6 +44,11 @@ class Customer extends Model
     public function voucherHistory()
     {
         return $this->hasMany(CustomerVoucherHistory::class)->latest('sent_at');
+    }
+
+    public function voucherCampaigns()
+    {
+        return $this->belongsToMany(\App\Models\VoucherCampaign::class, 'voucher_campaign_customers', 'customer_id', 'campaign_id');
     }
 
     // Order OTP Methods

@@ -33,12 +33,24 @@ class CustomerService
             ]);
 
             if (! empty($data['spocs'])) {
+                // Find if user explicitly set a primary
+                $explicitPrimaryIndex = collect($data['spocs'])->search(fn($s) => ($s['is_primary'] ?? false) === true);
+                
                 foreach ($data['spocs'] as $i => $spoc) {
+                    $isPrimary = false;
+                    if ($explicitPrimaryIndex !== false) {
+                        $isPrimary = $i === $explicitPrimaryIndex;
+                    } else {
+                        // Default: first active SPOC becomes primary (fallback)
+                        $isPrimary = $i === 0;
+                    }
+                    
                     $customer->spocs()->create([
                         'name'       => $spoc['name'],
                         'email'      => $spoc['email'],
                         'phone'      => $spoc['phone'] ?? null,
-                        'is_primary' => $i === 0,
+                        'is_primary' => $isPrimary,
+                        'status'     => $spoc['status'] ?? 'active',
                     ]);
                 }
             }
@@ -124,12 +136,23 @@ class CustomerService
             }
 
             if ($matchedSpoc) {
-                // PRIMARY SPOC PROTECTION: Check if trying to inactivate/delete primary
+                // PRIMARY SPOC PROTECTION: Only block if trying to inactivate a primary that has Pending OTP order
                 $isCurrentlyPrimary = $matchedSpoc->is_primary;
                 $isBecomingInactive = $requestedStatus === 'inactive';
 
                 if ($isCurrentlyPrimary && $isBecomingInactive) {
-                    throw new \Exception('Primary SPOC cannot be made inactive. Set another SPOC as primary first.');
+                    // Only block if this SPOC has a pending OTP order
+                    $hasPendingOtpOrder = false;
+                    if ($hasSendVoucherOrders) {
+                        $pendingOrder = \App\Models\SendVoucherOrder::where('spoc_id', $matchedSpoc->id)
+                            ->where('status', 'pending_otp')
+                            ->exists();
+                        $hasPendingOtpOrder = $pendingOrder;
+                    }
+                    
+                    if ($hasPendingOtpOrder) {
+                        throw new \Exception("Cannot change Primary SPOC. The current Primary SPOC ({$matchedSpoc->name}) has a pending order waiting for OTP verification. Please complete or cancel the order first.");
+                    }
                 }
 
                 // UPDATE existing SPOC

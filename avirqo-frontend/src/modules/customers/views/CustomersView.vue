@@ -68,112 +68,131 @@
       <button :disabled="store.pagination.current_page === store.pagination.last_page" @click="changePage(store.pagination.current_page + 1)">Next →</button>
     </div>
 
-    <!-- Create/Edit Modal -->
-    <div v-if="showForm" class="avq-modal-overlay" @click.self="showForm = false">
-      <div class="avq-modal">
-        <h3>{{ editId ? 'Edit Customer' : 'Add Customer' }}</h3>
-        <form @submit.prevent="submitForm">
+    <!-- Company Details Modal (Form 1) -->
+    <div v-if="showCompanyForm" class="avq-modal-overlay" @click.self="showCompanyForm = false">
+      <div class="avq-modal avq-modal-sm">
+        <h3>{{ editId ? 'Edit Company Details' : 'Add New Customer' }}</h3>
+        <form @submit.prevent="submitCompanyForm">
           <div class="form-grid">
             <div class="form-field">
               <label>Company Name *</label>
-              <input v-model="form.company_name" class="avq-input" required />
+              <input v-model="companyForm.company_name" class="avq-input" required />
             </div>
             <div class="form-field">
               <label>Location *</label>
-              <input v-model="form.location" class="avq-input" required />
+              <input v-model="companyForm.location" class="avq-input" required />
             </div>
             <div class="form-field">
               <label>GST Number</label>
-              <input v-model="form.gst_number" class="avq-input" />
+              <input v-model="companyForm.gst_number" class="avq-input" />
             </div>
             <div class="form-field">
               <label>Registration Number</label>
-              <input v-model="form.registration_number" class="avq-input" />
+              <input v-model="companyForm.registration_number" class="avq-input" />
             </div>
-          </div>
-
-          <div class="spoc-section">
-            <div class="spoc-head">
-              <h4>SPOCs (Contacts)</h4>
-              <button type="button" class="avq-btn-sm" @click="addSpoc">+ Add SPOC</button>
+            <div class="form-field">
+              <label>Voucher Campaign</label>
+              <select v-model="companyForm.voucher_campaign_id" class="avq-input">
+                <option value="">-- Select Campaign --</option>
+                <option v-for="campaign in campaigns" :key="campaign.id" :value="campaign.id">
+                  {{ campaign.name }}
+                </option>
+              </select>
             </div>
-            
-            <!-- EXISTING SPOCs (from database) -->
-            <template v-if="editId && existingSpocs.length">
-              <div class="spoc-subsection">
-                <h5 class="spoc-subtitle">Existing SPOCs</h5>
-                <div v-for="(spoc, idx) in existingSpocs" :key="spoc.id" class="spoc-row existing-spoc">
-                  <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
-                  <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
-                  <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
-                  
-                  <!-- Status Select -->
-                  <select v-model="spoc.status" class="avq-input" style="width:140px">
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                  
-                  <!-- Primary Badge & Toggle -->
-                  <div class="spoc-primary-cell" style="display:flex; align-items:center; gap:8px; min-width:120px">
-                    <span v-if="spoc.is_primary" class="spoc-primary">Primary</span>
-                    <button 
-                      v-else 
-                      type="button" 
-                      class="avq-btn-sm" 
-                      style="padding:4px 10px; font-size:11px"
-                      @click="makePrimary(spoc)"
-                      :disabled="spoc.status !== 'active'"
-                    >Set Primary</button>
-                  </div>
-                  
-                  <!-- Edit/Delete Actions -->
-                  <div class="spoc-actions" style="display:flex; gap:6px; align-items:center">
-                    <button 
-                      type="button" 
-                      class="avq-btn-sm btn-danger" 
-                      @click="removeExistingSpoc(spoc)"
-                      :disabled="spoc.is_primary"
-                      :title="spoc.is_primary ? 'Primary SPOC cannot be removed. Set another as primary first.' : ''"
-                    >✕</button>
-                  </div>
-                </div>
-              </div>
-            </template>
-
-            <!-- NEW SPOCs (being added) -->
-            <div class="spoc-subsection" v-if="newSpocs.length">
-              <h5 class="spoc-subtitle">New SPOCs</h5>
-              <div v-for="(spoc, i) in newSpocs" :key="i" class="spoc-row new-spoc">
-                <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
-                <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
-                <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
-                <button type="button" class="avq-btn-sm btn-danger" @click="removeNewSpoc(i)">✕</button>
-              </div>
-            </div>
-
-            <!-- Add New SPOC Button -->
-            <div class="spoc-add-row" style="margin-top:8px">
-              <button type="button" class="avq-btn-sm" @click="addSpoc" style="width:100%; justify-content:center">
-                + Add New SPOC
-              </button>
-            </div>
-          </div>
-
-          <div v-if="editId" class="doc-upload-note">
-            📎 To upload business documents, save this form first then click the customer row to open the detail panel — documents can be attached there.
-          </div>
-          <div v-else class="doc-upload-note">
-            📎 Business documents can be uploaded after the customer is created — click the customer row to open the detail panel.
           </div>
 
           <p v-if="formError" class="form-error">{{ formError }}</p>
           <div class="modal-footer">
-            <button type="button" class="avq-btn-ghost" @click="showForm = false">Cancel</button>
+            <button type="button" class="avq-btn-ghost" @click="showCompanyForm = false">Cancel</button>
             <button type="submit" class="avq-btn-primary" :disabled="formLoading">
-              {{ formLoading ? 'Saving…' : (editId ? 'Save changes' : 'Create customer') }}
+              {{ formLoading ? 'Saving…' : (editId ? 'Save Details' : 'Create Customer') }}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- SPOC Management Modal (Form 2) -->
+    <div v-if="showSpocForm" class="avq-modal-overlay" @click.self="showSpocForm = false">
+      <div class="avq-modal">
+        <h3>Manage SPOCs - {{ store.current?.company_name }}</h3>
+        
+        <div class="spoc-section">
+          <!-- EXISTING SPOCs -->
+          <div v-if="existingSpocs.length" class="spoc-subsection">
+            <h5 class="spoc-subtitle">Existing SPOCs</h5>
+            <div v-for="(spoc, idx) in existingSpocs" :key="spoc.id" class="spoc-row existing-spoc">
+              <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
+              <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
+              <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
+              
+              <select v-model="spoc.status" class="avq-input" style="width:140px">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              
+              <div class="spoc-primary-cell" style="display:flex; align-items:center; gap:8px; min-width:120px">
+                <span v-if="spoc.is_primary" class="spoc-primary">Primary</span>
+                <button 
+                  v-else 
+                  type="button" 
+                  class="avq-btn-sm" 
+                  style="padding:4px 10px; font-size:11px"
+                  @click="makePrimary(spoc)"
+                  :disabled="spoc.status !== 'active'"
+                >Set Primary</button>
+              </div>
+              
+              <div class="spoc-actions" style="display:flex; gap:6px; align-items:center">
+                <button 
+                  type="button" 
+                  class="avq-btn-sm btn-danger" 
+                  @click="removeExistingSpoc(spoc)"
+                  :disabled="spoc.is_primary"
+                  :title="spoc.is_primary ? 'Primary SPOC cannot be removed. Set another as primary first.' : ''"
+                >✕</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW SPOCs -->
+          <div class="spoc-subsection" v-if="newSpocs.length">
+            <h5 class="spoc-subtitle">New SPOCs</h5>
+            <div v-for="(spoc, i) in newSpocs" :key="i" class="spoc-row new-spoc">
+              <input v-model="spoc.name" class="avq-input" placeholder="Name *" required />
+              <input v-model="spoc.email" class="avq-input" type="email" placeholder="Email *" required />
+              <input v-model="spoc.phone" class="avq-input" placeholder="Phone" />
+              
+              <!-- Primary for new SPOCs -->
+              <div class="spoc-primary-cell" style="display:flex; align-items:center; gap:8px; min-width:120px">
+                <span v-if="spoc.is_primary" class="spoc-primary">Primary</span>
+                <button 
+                  v-else 
+                  type="button" 
+                  class="avq-btn-sm" 
+                  style="padding:4px 10px; font-size:11px"
+                  @click="makePrimary(spoc)"
+                >Set Primary</button>
+              </div>
+              
+              <button type="button" class="avq-btn-sm btn-danger" @click="removeNewSpoc(i)">✕</button>
+            </div>
+          </div>
+
+          <div class="spoc-add-row" style="margin-top:8px">
+            <button type="button" class="avq-btn-sm" @click="addSpoc" style="width:100%; justify-content:center">
+              + Add New SPOC
+            </button>
+          </div>
+        </div>
+
+        <p v-if="formError" class="form-error">{{ formError }}</p>
+        <div class="modal-footer">
+          <button type="button" class="avq-btn-ghost" @click="showSpocForm = false">Close</button>
+          <button type="button" class="avq-btn-primary" :disabled="formLoading" @click="saveSpocs">
+            {{ formLoading ? 'Saving…' : 'Save SPOCs' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -199,8 +218,20 @@
               <div class="detail-item"><span class="detail-label">GST Number</span><span class="detail-value">{{ store.current.gst_number || '—' }}</span></div>
               <div class="detail-item"><span class="detail-label">Registration No.</span><span class="detail-value">{{ store.current.registration_number || '—' }}</span></div>
               <div class="detail-item"><span class="detail-label">Customer Since</span><span class="detail-value">{{ new Date(store.current.created_at).toLocaleDateString('en-IN') }}</span></div>
+              <div class="detail-item">
+                <span class="detail-label">Voucher Campaign</span>
+                <span class="detail-value">
+                  <template v-if="store.current.voucher_campaigns?.length">
+                    <span class="campaign-badge">{{ store.current.voucher_campaigns[0].name }}</span>
+                  </template>
+                  <template v-else>—</template>
+                </span>
+              </div>
             </div>
-            <button class="avq-btn-sm" style="margin-top:12px" @click="showDetail=false; openEdit(store.current.id)">✏️ Edit Details</button>
+            <div style="margin-top:12px; display:flex; gap:8px;">
+              <button class="avq-btn-sm" @click="showDetail=false; openEdit(store.current.id)">✏️ Edit Company</button>
+              <button class="avq-btn-sm" @click="showDetail=false; editId = store.current.id; spocForm.spocs = store.current.spocs || []; showSpocForm = true;">👥 Manage SPOCs</button>
+            </div>
           </div>
 
           <!-- Balance -->
@@ -317,6 +348,28 @@
         </div>
       </div>
     </div>
+
+    <AppDialogModal
+      :open="alertDialogOpen"
+      :title="alertDialogTitle"
+      :message="alertDialogMessage"
+      confirm-text="OK"
+      :show-cancel="false"
+      @cancel="alertDialogOpen = false"
+      @confirm="alertDialogOpen = false"
+    />
+
+    <AppDialogModal
+      :open="deleteDocDialogOpen"
+      title="Delete document"
+      :message="deleteDocTarget ? `Delete ${deleteDocTarget.original_name}? This cannot be undone.` : ''"
+      confirm-text="Delete"
+      cancel-text="Keep file"
+      variant="danger"
+      :loading="deleteDocLoading"
+      @cancel="deleteDocDialogOpen = false"
+      @confirm="confirmDeleteDocNow"
+    />
   </div>
   </AppLayout>
 </template>
@@ -325,30 +378,44 @@
 import { ref, reactive, onMounted, computed } from 'vue';
 import { useCustomerStore } from '../store/customerStore';
 import customerApi from '../api/customerApi';
+import campaignApi from '../../campaigns/api/campaignApi';
 import AppLayout from '../../shared/components/AppLayout.vue';
+import AppDialogModal from '../../shared/components/AppDialogModal.vue';
 
 const store = useCustomerStore();
 const search = ref('');
 const statusFilter = ref('');
 const page = ref(1);
 
-const showForm = ref(false);
+const showCompanyForm = ref(false);
+const showSpocForm = ref(false);
 const editId = ref(null);
 const formLoading = ref(false);
 const formError = ref('');
 
-// Form state
-const form = reactive({ 
+// Available campaigns for dropdown
+const campaigns = ref([]);
+
+// Company Details Form (Form 1)
+const companyForm = reactive({ 
   company_name: '', 
   location: '', 
   gst_number: '', 
-  registration_number: '', 
-  spocs: [{ name: '', email: '', phone: '' }] 
+  registration_number: '',
+  voucher_campaign_id: '' 
+});
+
+// SPOC Form (Form 2)
+const spocForm = reactive({ 
+  spocs: [] 
 });
 
 // Computed: Separate existing SPOCs (with ID) from new SPOCs (without ID)
-const existingSpocs = computed(() => form.spocs.filter(s => s.id));
-const newSpocs = computed(() => form.spocs.filter(s => !s.id));
+// Only show ACTIVE SPOCs in the edit form
+const existingSpocs = computed(() => 
+  spocForm.spocs.filter(s => s.id && s.status !== 'inactive')
+);
+const newSpocs = computed(() => spocForm.spocs.filter(s => !s.id));
 
 const showDetail = ref(false);
 const showBalance = ref(false);
@@ -357,15 +424,30 @@ const balanceAmount = ref('');
 const balanceNote = ref('');
 const balanceLoading = ref(false);
 const balanceError = ref('');
+const alertDialogOpen = ref(false);
+const alertDialogTitle = ref('Notice');
+const alertDialogMessage = ref('');
+const deleteDocDialogOpen = ref(false);
+const deleteDocTarget = ref(null);
+const deleteDocLoading = ref(false);
 
 // Detail view: Only active SPOCs
 const activeSpocs = computed(() => 
   store.current?.spocs?.filter(s => s.status === 'active') || []
 );
 
-onMounted(() => loadList());
+onMounted(() => { loadList(); loadCampaigns(); });
 
 function loadList() { store.fetchList({ search: search.value, status: statusFilter.value, page: page.value }); }
+
+async function loadCampaigns() {
+  try {
+    const { data } = await campaignApi.list();
+    campaigns.value = data.data || data;
+  } catch (e) {
+    console.error('Failed to load campaigns:', e);
+  }
+}
 function changePage(p) { page.value = p; loadList(); }
 
 function primarySpoc(c) { return c.spocs?.find((s) => s.is_primary)?.name || c.spocs?.[0]?.name || '—'; }
@@ -373,50 +455,63 @@ function statusLabel(s) { return { active: 'Active', on_hold: 'On Hold', inactiv
 
 function openCreate() {
   editId.value = null;
-  Object.assign(form, { 
+  
+  // Ensure campaigns are loaded before opening form
+  if (campaigns.value.length === 0) {
+    loadCampaigns();
+  }
+  
+  Object.assign(companyForm, { 
     company_name: '', 
     location: '', 
     gst_number: '', 
-    registration_number: '', 
-    spocs: [{ name: '', email: '', phone: '' }] 
+    registration_number: '',
+    voucher_campaign_id: '' 
   });
   formError.value = '';
-  showForm.value = true;
+  showCompanyForm.value = true;
 }
 
 async function openEdit(id) {
   await store.fetchOne(id);
   editId.value = id;
   const c = store.current;
-  Object.assign(form, {
+  
+  // Ensure campaigns are loaded before setting form values
+  if (campaigns.value.length === 0) {
+    await loadCampaigns();
+  }
+  
+  // Load company details
+  Object.assign(companyForm, {
     company_name: c.company_name, 
     location: c.location,
     gst_number: c.gst_number || '', 
     registration_number: c.registration_number || '',
-    spocs: c.spocs?.length ? c.spocs.map((s) => ({ 
-      id: s.id,
-      name: s.name, 
-      email: s.email, 
-      phone: s.phone || '',
-      status: s.status || 'active',
-      is_primary: s.is_primary || false
-    })) : [{ name: '', email: '', phone: '' }],
+    voucher_campaign_id: c.voucher_campaigns?.[0]?.id || '',
   });
+  
+  // Load SPOCs into separate form
+  spocForm.spocs = c.spocs?.length ? c.spocs.map((s) => ({ 
+    id: s.id,
+    name: s.name, 
+    email: s.email, 
+    phone: s.phone || '',
+    status: s.status || 'active',
+    is_primary: s.is_primary || false
+  })) : [];
+  
   formError.value = '';
-  showForm.value = true;
+  showCompanyForm.value = true;
 }
 
 function addSpoc() { 
-  form.spocs.push({ name: '', email: '', phone: '' }); 
-}
-
-function removeSpoc(i) { 
-  form.spocs.splice(i, 1); 
+  spocForm.spocs.push({ name: '', email: '', phone: '' }); 
 }
 
 function removeNewSpoc(i) {
-  const idx = form.spocs.findIndex(s => !s.id);
-  if (idx >= 0) form.spocs.splice(idx, 1);
+  const idx = spocForm.spocs.findIndex(s => !s.id);
+  if (idx >= 0) spocForm.spocs.splice(idx, 1);
 }
 
 function removeExistingSpoc(spoc) {
@@ -424,7 +519,7 @@ function removeExistingSpoc(spoc) {
     formError.value = 'Primary SPOC cannot be removed. Set another as primary first.';
     return;
   }
-  form.spocs = form.spocs.filter(s => s.id !== spoc.id);
+  spocForm.spocs = spocForm.spocs.filter(s => s.id !== spoc.id);
 }
 
 function makePrimary(spoc) {
@@ -433,39 +528,104 @@ function makePrimary(spoc) {
     return;
   }
   // Remove primary from all others
-  form.spocs.forEach(s => { s.is_primary = false; });
+  spocForm.spocs.forEach(s => { s.is_primary = false; });
   // Set this as primary
   spoc.is_primary = true;
 }
 
-async function submitForm() {
+// Helper: Ensure exactly one primary when saving
+function ensureSinglePrimary() {
+  const activeSpocs = spocForm.spocs.filter(s => s.status === 'active' || !s.status);
+  const primaryCount = activeSpocs.filter(s => s.is_primary).length;
+  
+  if (primaryCount === 0 && activeSpocs.length > 0) {
+    // Make first active one primary
+    activeSpocs[0].is_primary = true;
+  } else if (primaryCount > 1) {
+    // Keep only the last one as primary
+    let foundPrimary = false;
+    spocForm.spocs.forEach(s => {
+      if (s.is_primary && s.status !== 'inactive') {
+        if (foundPrimary) s.is_primary = false;
+        else foundPrimary = true;
+      }
+    });
+  }
+}
+
+// Submit Company Details (Form 1)
+async function submitCompanyForm() {
+  formLoading.value = true;
+  formError.value = '';
+
+  try {
+    const payload = {
+      company_name: companyForm.company_name,
+      location: companyForm.location,
+      gst_number: companyForm.gst_number || null,
+      registration_number: companyForm.registration_number || null,
+      voucher_campaign_id: companyForm.voucher_campaign_id || null,
+    };
+
+    if (editId.value) {
+      await store.update(editId.value, payload);
+      showCompanyForm.value = false;
+      // Open SPOC form after saving company details
+      showSpocForm.value = true;
+    } else {
+      const newCustomer = await store.create(payload);
+      editId.value = newCustomer.id;
+      showCompanyForm.value = false;
+      // Open SPOC form for new customer
+      spocForm.spocs = [];
+      showSpocForm.value = true;
+    }
+    loadList();
+  } catch (e) {
+    const message = e.response?.data?.message || 'Save failed.';
+    formError.value = message;
+    openAlertDialog(message, 'Save failed');
+  } finally {
+    formLoading.value = false;
+  }
+}
+
+// Save SPOCs (Form 2)
+async function saveSpocs() {
   formLoading.value = true;
   formError.value = '';
   
   // Validation: At least one active SPOC required
-  const activeCount = form.spocs.filter(s => s.status === 'active').length;
+  const activeCount = spocForm.spocs.filter(s => (s.status || 'active') === 'active').length;
   if (activeCount === 0) {
     formError.value = 'At least one active SPOC is required.';
     formLoading.value = false;
     return;
   }
   
-  // Validation: Must have a primary SPOC
-  const hasPrimary = form.spocs.some(s => s.is_primary && s.status === 'active');
-  if (!hasPrimary) {
+  // Ensure single primary
+  ensureSinglePrimary();
+
+  // Auto-assign primary if none exists (for new customers or customers with 0 SPOCs)
+  const activeSpocs = spocForm.spocs.filter(s => (s.status || 'active') === 'active');
+  const hasPrimary = activeSpocs.some(s => s.is_primary);
+
+  if (!hasPrimary && activeSpocs.length > 0) {
+    // Make the first active SPOC as primary by default
+    activeSpocs[0].is_primary = true;
+  }
+
+  // Final check after auto-assign
+  const finalHasPrimary = spocForm.spocs.some(s => s.is_primary && (s.status || 'active') === 'active');
+  if (!finalHasPrimary && activeSpocs.length > 0) {
     formError.value = 'An active primary SPOC is required.';
     formLoading.value = false;
     return;
   }
 
   try {
-    // Prepare payload - include id for existing SPOCs
     const payload = {
-      company_name: form.company_name,
-      location: form.location,
-      gst_number: form.gst_number || null,
-      registration_number: form.registration_number || null,
-      spocs: form.spocs.map(s => ({
+      spocs: spocForm.spocs.map(s => ({
         id: s.id || undefined,
         name: s.name,
         email: s.email,
@@ -475,16 +635,13 @@ async function submitForm() {
       }))
     };
 
-    if (editId.value) {
-      await store.update(editId.value, payload);
-    } else {
-      await store.create(payload);
-    }
-    showForm.value = false;
+    await store.update(editId.value, payload);
+    showSpocForm.value = false;
     loadList();
   } catch (e) {
-    const errs = e.response?.data?.errors;
-    formError.value = errs ? Object.values(errs).flat().join(' ') : (e.response?.data?.message || 'Save failed.');
+    const message = e.response?.data?.message || 'Save failed.';
+    formError.value = message;
+    openAlertDialog(message, 'Save failed');
   } finally {
     formLoading.value = false;
   }
@@ -505,6 +662,12 @@ function openBalance(type) {
   balanceNote.value = '';
   balanceError.value = '';
   showBalance.value = true;
+}
+
+function openAlertDialog(message, title = 'Notice') {
+  alertDialogTitle.value = title;
+  alertDialogMessage.value = message;
+  alertDialogOpen.value = true;
 }
 
 async function submitBalance() {
@@ -543,15 +706,28 @@ async function confirmUpload() {
     await store.uploadDocument(store.current.id, pendingFile.value);
     pendingFile.value = null;
   } catch (e) {
-    alert(e.response?.data?.message || 'Upload failed.');
+    openAlertDialog(e.response?.data?.message || 'Upload failed.', 'Upload failed');
   } finally {
     uploadLoading.value = false;
   }
 }
 
 async function confirmDeleteDoc(doc) {
-  if (!confirm(`Delete "${doc.original_name}"?`)) return;
-  await store.deleteDocument(store.current.id, doc.id);
+  deleteDocTarget.value = doc;
+  deleteDocDialogOpen.value = true;
+}
+
+async function confirmDeleteDocNow() {
+  if (!deleteDocTarget.value) return;
+  deleteDocLoading.value = true;
+  try {
+    await store.deleteDocument(store.current.id, deleteDocTarget.value.id);
+    deleteDocDialogOpen.value = false;
+  } catch (e) {
+    openAlertDialog(e.response?.data?.message || 'Failed to delete the file.', 'Delete failed');
+  } finally {
+    deleteDocLoading.value = false;
+  }
 }
 
 async function downloadDoc(doc) {
@@ -569,7 +745,7 @@ async function downloadDoc(doc) {
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href);
   } catch (e) {
-    alert('Could not download the file. Please try again.');
+    openAlertDialog('Could not download the file. Please try again.', 'Download failed');
   }
 }
 
@@ -675,4 +851,5 @@ function formatSize(bytes) {
 .detail-item { display: flex; flex-direction: column; gap: 4px; }
 .detail-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted, #6B6A67); }
 .detail-value { font-size: 14px; color: var(--ink, #0D0D0C); font-weight: 500; }
+.campaign-badge { background: var(--teal-pale); color: var(--teal-deep); padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 600; }
 </style>

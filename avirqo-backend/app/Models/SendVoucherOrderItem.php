@@ -10,12 +10,17 @@ class SendVoucherOrderItem extends Model
 
     protected $fillable = [
         'order_id', 'product_id', 'denomination',
-        'currency_code', 'quantity', 'total_value',
+        'currency_code', 'quantity', 'gross_total', 'global_margin_percentage', 'global_margin_amount', 'discount_percentage', 'discount_amount', 'total_value',
     ];
 
     protected $casts = [
         'denomination' => 'decimal:2',
         'total_value' => 'decimal:2',
+        'gross_total' => 'decimal:2',
+        'global_margin_percentage' => 'decimal:2',
+        'global_margin_amount' => 'decimal:2',
+        'discount_percentage' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
     ];
 
     public function order()

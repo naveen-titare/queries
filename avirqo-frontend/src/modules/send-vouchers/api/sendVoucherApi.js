@@ -3,7 +3,7 @@ import apiClient from '../../../shared/apiClient';
 export default {
   getCatalog(params = {}) { return apiClient.get('/send-vouchers/catalog', { params }); },
   getProduct(id) { return apiClient.get(`/send-vouchers/catalog/${id}`); },
-  validateCart(items) { return apiClient.post('/send-vouchers/cart/validate', { items }); },
+  validateCart(items, customerId, pricingMode = 'product', proformaInvoiceId = null) { return apiClient.post('/send-vouchers/cart/validate', { items, customer_id: customerId, pricing_mode: pricingMode, proforma_invoice_id: proformaInvoiceId }); },
   
   // Legacy direct order (without OTP)
   placeOrder(data) { return apiClient.post('/send-vouchers/orders', data); },

@@ -26,6 +26,10 @@ class SendVoucherOrderMail extends Mailable
         return $this
             ->subject("Your Avirqo Vouchers — Order {$this->orderNumber}")
             ->view('emails.send-voucher-order')
+            ->with([
+                'spocName' => $this->order->spoc_name ?: $this->spoc->name,
+                'spocEmail' => $this->order->spoc_email ?: $this->spoc->email,
+            ])
             ->attachData(
                 $this->excelContent,
                 "Avirqo-Send-Vouchers-{$this->orderNumber}.xlsx",

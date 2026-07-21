@@ -1,219 +1,589 @@
 <template>
   <AppLayout>
-    <main class="avq-content">
-      <p class="avq-welcome">Welcome back, {{ firstName }} — session renews until {{ formattedExpiry }}</p>
-
-      <div class="avq-grid">
-        <!-- Left column -->
-        <div class="avq-col-main">
-          <!-- Analytics bar chart -->
-          <section class="avq-card">
-            <div class="avq-card-head">
-              <h3>Vouchers Sent</h3>
-              <span class="avq-pill">Last 6 months</span>
-            </div>
-            <svg class="avq-barchart" viewBox="0 0 340 140" preserveAspectRatio="none">
-              <line x1="0" y1="20" x2="340" y2="20" stroke="#F0B429" stroke-dasharray="4 4" stroke-width="1" />
-              <rect
-                v-for="(bar, i) in bars"
-                :key="bar.label"
-                :x="i * 56 + 10"
-                :y="120 - bar.height"
-                width="30"
-                :height="bar.height"
-                rx="4"
-                :fill="bar.peak ? '#1D9E75' : '#E4EDE9'"
-              />
-            </svg>
-            <div class="avq-barchart-labels">
-              <span v-for="bar in bars" :key="bar.label + '-lbl'">{{ bar.label }}</span>
-            </div>
-          </section>
-
-          <!-- Engagement stats -->
-          <section class="avq-card">
-            <h3>Engagement</h3>
-            <div class="avq-stats-row">
-              <div class="avq-stat">
-                <div class="avq-stat-val">12.9K</div>
-                <div class="avq-stat-label">Recipients reached</div>
-                <svg class="avq-spark" viewBox="0 0 80 28"><polyline :points="sparkUp" fill="none" stroke="#1D9E75" stroke-width="2" /></svg>
-              </div>
-              <div class="avq-stat">
-                <div class="avq-stat-val">94%</div>
-                <div class="avq-stat-label">Redemption rate</div>
-                <svg class="avq-spark" viewBox="0 0 80 28"><polyline :points="sparkFlat" fill="none" stroke="#085041" stroke-width="2" /></svg>
-              </div>
-            </div>
-          </section>
-
-          <!-- Donuts -->
-          <section class="avq-card">
-            <h3>Redemption Breakdown</h3>
-            <div class="avq-donuts">
-              <div class="avq-donut-item" v-for="d in donuts" :key="d.label">
-                <svg viewBox="0 0 80 80" class="avq-donut">
-                  <circle cx="40" cy="40" r="32" fill="none" stroke="#E4EDE9" stroke-width="10" />
-                  <circle
-                    cx="40" cy="40" r="32" fill="none"
-                    :stroke="d.color" stroke-width="10"
-                    stroke-linecap="round"
-                    :stroke-dasharray="`${d.pct * 2.0106} 1000`"
-                    transform="rotate(-90 40 40)"
-                  />
-                  <text x="40" y="45" text-anchor="middle" class="avq-donut-text">{{ d.pct }}%</text>
-                </svg>
-                <div class="avq-donut-label">{{ d.label }}</div>
-              </div>
-            </div>
-          </section>
+    <main class="dashboard-page">
+      <section class="dashboard-hero">
+        <div>
+          <p class="eyebrow">{{ data?.financial_year?.label || 'Financial year' }}</p>
+          <h1>Dashboard</h1>
+          <p>Track orders, voucher value, top customers and top brands for the active financial year.</p>
         </div>
+        <button class="avq-btn-ghost" @click="loadDashboard" :disabled="loading">
+          {{ loading ? 'Refreshing…' : 'Refresh' }}
+        </button>
+      </section>
 
-        <!-- Right column -->
-        <div class="avq-col-side">
-          <section class="avq-card">
-            <h3>Redemption Trend</h3>
-            <svg class="avq-trend" viewBox="0 0 220 90" preserveAspectRatio="none">
-              <polyline :points="trendPoints" fill="none" stroke="#085041" stroke-width="2.5" />
-            </svg>
-            <div class="avq-trend-labels">
-              <span>Mon</span><span>Wed</span><span>Fri</span><span>Sun</span>
-            </div>
-          </section>
-
-          <section class="avq-card">
-            <h3>Top Brands &amp; Recipients</h3>
-            <div class="avq-toplists">
-              <div>
-                <div class="avq-toplist-title">Top Brands</div>
-                <ol>
-                  <li v-for="b in topBrands" :key="b">{{ b }}</li>
-                </ol>
-              </div>
-              <div>
-                <div class="avq-toplist-title">Top Recipients</div>
-                <ol>
-                  <li v-for="r in topRecipients" :key="r">{{ r }}</li>
-                </ol>
-              </div>
-            </div>
-          </section>
-        </div>
+      <div v-if="error" class="dashboard-alert">
+        {{ error }}
       </div>
 
-      <p class="avq-note">Placeholder data — this wires up to the real vouchers/rewards module next.</p>
+      <section class="dashboard-grid">
+        <DashboardCard
+          title="Orders"
+          subtitle="Order value vs discounts and service charge"
+          :period="periods.orders_period"
+          :period-options="periodOptions"
+          :range="data?.orders?.range?.label"
+          @change-period="setPeriod('orders_period', $event)"
+        >
+          <div class="metric-row">
+            <Metric label="Order value" :value="money(data?.orders?.summary?.order_value)" />
+            <Metric label="Discount" :value="money(data?.orders?.summary?.discount)" />
+            <Metric label="Service charge" :value="money(data?.orders?.summary?.service_charge)" />
+          </div>
+          <BarChart
+            :items="data?.orders?.timeline || []"
+            mode="orders"
+            empty-text="No orders found for this period."
+          />
+        </DashboardCard>
+
+        <DashboardCard
+          title="Vouchers sent"
+          subtitle="Total voucher denomination value delivered"
+          :period="periods.vouchers_period"
+          :period-options="periodOptions"
+          :range="data?.vouchers?.range?.label"
+          @change-period="setPeriod('vouchers_period', $event)"
+        >
+          <div class="metric-row single">
+            <Metric label="Voucher amount" :value="money(data?.vouchers?.summary?.voucher_amount)" />
+          </div>
+          <BarChart
+            :items="data?.vouchers?.timeline || []"
+            mode="vouchers"
+            empty-text="No vouchers sent for this period."
+          />
+        </DashboardCard>
+
+        <DashboardCard
+          title="Top customers"
+          subtitle="Highest order value customers"
+          :period="periods.customers_period"
+          :period-options="periodOptions"
+          :range="data?.customers?.range?.label"
+          @change-period="setPeriod('customers_period', $event)"
+        >
+          <RankList
+            :items="data?.customers?.top_customers || []"
+            name-key="company_name"
+            empty-text="No customer orders found for this period."
+          />
+        </DashboardCard>
+
+        <DashboardCard
+          title="Top brands"
+          subtitle="Highest order value brands"
+          :period="periods.brands_period"
+          :period-options="periodOptions"
+          :range="data?.brands?.range?.label"
+          @change-period="setPeriod('brands_period', $event)"
+        >
+          <RankList
+            :items="data?.brands?.top_brands || []"
+            name-key="brand_name"
+            empty-text="No brand orders found for this period."
+          />
+        </DashboardCard>
+      </section>
     </main>
   </AppLayout>
 </template>
 
 <script setup>
-import { computed } from 'vue';
-import { useAuthStore } from '../../auth/store/authStore';
+import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue';
 import AppLayout from '../../shared/components/AppLayout.vue';
+import dashboardApi from '../api/dashboardApi';
 
-const auth = useAuthStore();
-
-const firstName = computed(() => (auth.user?.name || 'there').split(' ')[0]);
-const formattedExpiry = computed(() => {
-  if (!auth.accessTokenExpiresAt) return '';
-  return new Date(auth.accessTokenExpiresAt).toLocaleString();
-});
-
-const rawBars = [1200, 1600, 1400, 2100, 1800, 2400];
-const maxBar = Math.max(...rawBars);
-const bars = rawBars.map((v, i) => ({
-  label: ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'][i],
-  height: Math.round((v / maxBar) * 90),
-  peak: v === maxBar,
-}));
-
-const sparkUp = '0,24 15,20 30,22 45,10 60,14 80,4';
-const sparkFlat = '0,14 15,16 30,10 45,12 60,8 80,6';
-const trendPoints = '0,60 30,40 60,55 90,25 120,45 150,20 180,35 220,15';
-
-const donuts = [
-  { label: 'Redeemed', pct: 85, color: '#F0B429' },
-  { label: 'Pending', pct: 40, color: '#7C3AED' },
-  { label: 'Sent', pct: 65, color: '#4F46E5' },
+const periodOptions = [
+  { value: 'week', label: 'Week' },
+  { value: 'bi-weekly', label: 'Bi-weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'half-yearly', label: 'Half yearly' },
+  { value: 'yearly', label: 'Yearly' },
 ];
 
-const topBrands = ['Amazon', 'AJIO', 'Starbucks'];
-const topRecipients = ['Rahul K.', 'Ananya S.', 'Priya M.'];
+const periods = reactive({
+  orders_period: 'week',
+  vouchers_period: 'week',
+  customers_period: 'week',
+  brands_period: 'week',
+});
+
+const data = ref(null);
+const loading = ref(false);
+const error = ref('');
+
+function money(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+}
+
+async function loadDashboard() {
+  loading.value = true;
+  error.value = '';
+
+  try {
+    const response = await dashboardApi.summary({ ...periods });
+    data.value = response.data;
+  } catch (err) {
+    error.value = err?.response?.data?.message || 'Unable to load dashboard right now.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+function setPeriod(key, value) {
+  periods[key] = value;
+  loadDashboard();
+}
+
+onMounted(loadDashboard);
+
+const DashboardCard = defineComponent({
+  props: {
+    title: { type: String, required: true },
+    subtitle: { type: String, required: true },
+    period: { type: String, required: true },
+    periodOptions: { type: Array, required: true },
+    range: { type: String, default: '' },
+  },
+  emits: ['change-period'],
+  setup(props, { emit, slots }) {
+    return () => h('article', { class: 'dashboard-card' }, [
+      h('div', { class: 'card-head' }, [
+        h('div', [
+          h('h2', props.title),
+          h('p', props.subtitle),
+          props.range ? h('span', { class: 'range-pill' }, props.range) : null,
+        ]),
+        h('select', {
+          class: 'period-select',
+          value: props.period,
+          onChange: (event) => emit('change-period', event.target.value),
+        }, props.periodOptions.map((option) => h('option', { value: option.value }, option.label))),
+      ]),
+      slots.default?.(),
+    ]);
+  },
+});
+
+const Metric = defineComponent({
+  props: {
+    label: { type: String, required: true },
+    value: { type: String, required: true },
+  },
+  setup(props) {
+    return () => h('div', { class: 'metric' }, [
+      h('span', props.label),
+      h('strong', props.value),
+    ]);
+  },
+});
+
+const BarChart = defineComponent({
+  props: {
+    items: { type: Array, default: () => [] },
+    mode: { type: String, required: true },
+    emptyText: { type: String, required: true },
+  },
+  setup(props) {
+    const maxValue = computed(() => Math.max(
+      1,
+      ...props.items.map((item) => props.mode === 'vouchers'
+        ? Number(item.voucher_amount || 0)
+        : Math.max(Number(item.order_value || 0), Number(item.discount || 0), Number(item.service_charge || 0))),
+    ));
+
+    const hasData = computed(() => props.items.some((item) => (
+      Number(item.order_value || 0) ||
+      Number(item.discount || 0) ||
+      Number(item.service_charge || 0) ||
+      Number(item.voucher_amount || 0)
+    )));
+
+    function height(value) {
+      return `${Math.max(4, (Number(value || 0) / maxValue.value) * 150)}px`;
+    }
+
+    function tooltipRows(item) {
+      if (props.mode === 'vouchers') {
+        return [
+          ['Voucher amount', money(item.voucher_amount)],
+        ];
+      }
+
+      return [
+        ['Order value', money(item.order_value)],
+        ['Discount', money(item.discount)],
+        ['Service charge', money(item.service_charge)],
+      ];
+    }
+
+    return () => {
+      if (!props.items.length || !hasData.value) {
+        return h('div', { class: 'empty-state' }, props.emptyText);
+      }
+
+      return h('div', { class: 'bar-chart' }, [
+        h('div', {
+          class: 'bar-chart-inner',
+          style: { width: props.items.length > 7 ? `${props.items.length * 74}px` : '100%' },
+        }, props.items.map((item) => h('div', { class: 'bar-group' }, [
+          h('div', { class: 'chart-tooltip' }, [
+            h('strong', item.label),
+            ...tooltipRows(item).map(([label, value]) => h('div', { class: 'tooltip-row' }, [
+              h('span', label),
+              h('b', value),
+            ])),
+          ]),
+          props.mode === 'vouchers'
+            ? h('div', { class: 'bar voucher', style: { height: height(item.voucher_amount) } })
+            : h('div', { class: 'stack' }, [
+              h('div', { class: 'bar order', style: { height: height(item.order_value) } }),
+              h('div', { class: 'bar discount', style: { height: height(item.discount) } }),
+              h('div', { class: 'bar charge', style: { height: height(item.service_charge) } }),
+            ]),
+          h('span', item.label),
+        ]))),
+      ]);
+    };
+  },
+});
+
+const RankList = defineComponent({
+  props: {
+    items: { type: Array, default: () => [] },
+    nameKey: { type: String, required: true },
+    emptyText: { type: String, required: true },
+  },
+  setup(props) {
+    return () => {
+      if (!props.items.length) {
+        return h('div', { class: 'empty-state' }, props.emptyText);
+      }
+
+      return h('div', { class: 'rank-list' }, props.items.map((item) => h('div', { class: 'rank-row' }, [
+        h('span', { class: 'rank' }, `#${item.rank}`),
+        h('div', { class: 'rank-main' }, [
+          h('strong', item[props.nameKey]),
+          h('span', `${item.orders_count} order${Number(item.orders_count) === 1 ? '' : 's'}`),
+        ]),
+        h('span', { class: 'rank-value' }, money(item.order_value)),
+      ])));
+    };
+  },
+});
 </script>
 
 <style>
-.avq-content { padding: 28px; }
-.avq-welcome { color: var(--ink-muted); font-size: 13px; margin-bottom: 20px; }
+.dashboard-page {
+  padding: 28px;
+}
 
-.avq-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
+.dashboard-hero {
+  display: flex;
+  justify-content: space-between;
   gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 22px;
 }
 
-@media (max-width: 860px) {
-  .avq-grid { grid-template-columns: 1fr; }
+.eyebrow {
+  color: var(--teal-deep);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
 }
 
-.avq-col-main, .avq-col-side { display: flex; flex-direction: column; gap: 20px; }
+.dashboard-hero h1 {
+  font-family: var(--fd);
+  font-size: 36px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
 
-.avq-card {
+.dashboard-hero p {
+  color: var(--ink-muted);
+  font-size: 15px;
+}
+
+.dashboard-alert {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  color: #9a3412;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-card {
   background: #fff;
   border: 1px solid var(--border-2);
-  border-radius: 14px;
+  border-radius: 18px;
   padding: 20px;
-  box-shadow: 0 4px 16px rgba(8, 80, 65, 0.05);
+  box-shadow: 0 16px 40px rgba(8, 80, 65, 0.04);
 }
 
-.avq-card h3 {
-  font-family: var(--fd);
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 14px;
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
 }
 
-.avq-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.avq-card-head h3 { margin-bottom: 0; }
+.card-head h2 {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
 
-.avq-pill {
-  font-size: 11px;
-  font-weight: 600;
+.card-head p {
+  color: var(--ink-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.range-pill {
+  display: inline-flex;
   background: var(--teal-pale);
   color: var(--teal-deep);
-  padding: 4px 10px;
-  border-radius: 100px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.avq-barchart { width: 100%; height: 130px; }
-.avq-barchart-labels {
-  display: flex;
-  justify-content: space-around;
-  font-size: 11px;
+.period-select {
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  padding: 9px 12px;
+  min-width: 140px;
+  font: inherit;
+  font-weight: 700;
+  background: #fff;
+  color: var(--ink);
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.metric-row.single {
+  grid-template-columns: 1fr;
+}
+
+.metric {
+  background: var(--surface-2);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.metric span {
+  display: block;
   color: var(--ink-muted);
-  margin-top: 4px;
+  font-size: 12px;
+  margin-bottom: 5px;
 }
 
-.avq-stats-row { display: flex; gap: 24px; }
-.avq-stat { flex: 1; }
-.avq-stat-val { font-family: var(--fd); font-size: 24px; font-weight: 600; }
-.avq-stat-label { font-size: 12px; color: var(--ink-muted); margin-bottom: 8px; }
-.avq-spark { width: 100%; height: 28px; }
-
-.avq-donuts { display: flex; justify-content: space-between; gap: 12px; }
-.avq-donut-item { text-align: center; flex: 1; }
-.avq-donut { width: 80px; height: 80px; }
-.avq-donut-text { font-family: var(--fb); font-size: 14px; font-weight: 700; fill: var(--ink); }
-.avq-donut-label { font-size: 11px; color: var(--ink-muted); margin-top: 4px; }
-
-.avq-trend { width: 100%; height: 90px; }
-.avq-trend-labels {
-  display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--ink-muted); margin-top: 4px;
+.metric strong {
+  font-size: 20px;
+  color: var(--teal-deep);
 }
 
-.avq-toplists { display: flex; gap: 24px; }
-.avq-toplist-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); margin-bottom: 8px; }
-.avq-toplists ol { padding-left: 18px; font-size: 13px; color: var(--ink-soft); line-height: 2; }
+.bar-chart {
+  min-height: 210px;
+  border-top: 1px solid var(--border-2);
+  padding-top: 64px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
 
-.avq-note { text-align: center; color: var(--ink-faint, #B4B2A9); font-size: 12px; margin-top: 24px; }
+.bar-chart-inner {
+  min-width: 100%;
+  min-height: 155px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.bar-group {
+  position: relative;
+  flex: 1;
+  min-width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  bottom: calc(100% - 26px);
+  left: 50%;
+  transform: translate(-50%, 8px);
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 18px 42px rgba(8, 80, 65, 0.16);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 5;
+}
+
+.chart-tooltip strong {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  margin-bottom: 7px;
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tooltip-row b {
+  color: var(--teal-deep);
+  white-space: nowrap;
+}
+
+.bar-group:hover .chart-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.bar-group span {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-align: center;
+  min-height: 28px;
+}
+
+.stack {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  height: 155px;
+}
+
+.bar {
+  width: 12px;
+  min-height: 4px;
+  border-radius: 8px 8px 3px 3px;
+  transition: transform 0.15s ease;
+}
+
+.bar-group:hover .bar {
+  transform: translateY(-3px);
+}
+
+.bar.order,
+.bar.voucher {
+  background: var(--teal-deep);
+}
+
+.bar.discount {
+  background: #16a34a;
+}
+
+.bar.charge {
+  background: #d97706;
+}
+
+.rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-2);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.rank {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--teal-pale);
+  color: var(--teal-deep);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+}
+
+.rank-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rank-main strong,
+.rank-main span {
+  display: block;
+}
+
+.rank-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-main span {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.rank-value {
+  color: var(--teal-deep);
+  font-weight: 800;
+}
+
+.empty-state {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-2);
+  border-radius: 14px;
+  color: var(--ink-muted);
+  font-weight: 700;
+  text-align: center;
+  padding: 20px;
+}
+
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

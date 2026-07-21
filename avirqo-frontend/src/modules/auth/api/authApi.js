@@ -4,6 +4,9 @@ export default {
   login(email, password) {
     return apiClient.post('/auth/login', { email, password });
   },
+  me() {
+    return apiClient.get('/user');
+  },
   verifyLogin2fa(challengeToken, code) {
     return apiClient.post('/auth/verify-2fa', { challenge_token: challengeToken, code });
   },
@@ -17,12 +20,12 @@ export default {
     return apiClient.post('/auth/logout', {});
   },
   confirmSetup(setupToken, code) {
-    return apiClient.post('/auth/setup/confirm', { setup_token: setupToken, code });
+    return apiClient.post('/auth/2fa/setup/confirm', { setup_token: setupToken, code });
   },
   requestReset(challengeToken) {
-    return apiClient.post('/auth/reset/request', { challenge_token: challengeToken });
+    return apiClient.post('/auth/2fa/reset/request', { challenge_token: challengeToken });
   },
   verifyResetToken(token) {
-    return apiClient.post(`/auth/reset/verify/${token}`);
+    return apiClient.post(`/auth/2fa/reset/${token}/verify`);
   },
 };
